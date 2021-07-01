@@ -4,6 +4,8 @@
 Created on Fri Jun 25 16:17:14 2021
 Discretized NLP for compressor optimization with outer convexification.
 @author: katharinaenin
+
+Copyright 2021 Katharina Enin
 """
 
 import numpy as np
@@ -15,31 +17,46 @@ import itertools
 length_of_pipe = 200; # universal length, constant in m
 time_in_total = 10; # time in seconds
 
+def df_to_int(df):
+    """
+    Function for turning integers encapsulated in strings 
+    into real integers, e.g. '3' becomes 3
+    input: dataframe
+    output: adjusted dataframe
+    """
+    for i in range(0,df.shape[0]):
+        for j in range(0,df.shape[1]):
+            try:
+                df.iloc[i][j] = int(df.iloc[i][j])
+            except:
+                pass
+
 
 def get_ingoing_edges(df, node):
     """
     Function for extracting ingoing edges from Edges.txt
-    input: dataframe; node from which we want to get the ingoing edges
+    input: dataframe, node from which we want to get the ingoing edges
     output: list of edges (type: list of int)
     """
     list_of_edges = []
     for i in range(0, df.shape[0]):
-        if df.iloc[i][2] == str(node):
-            list_of_edges.append(int(df.iloc[i][0]))
-            
+        if df.iloc[i][2] == node:
+            list_of_edges.append(df.iloc[i][0])
+                
     return list_of_edges
 
 
 def get_outgoing_edges(df, node):
     """
     Function for extracting outgoing arcs from Edges.txt
-    input: dataframe; node from which we want to get the outgoing edges 
+    input: dataframe; node which we want to get the outgoing edges from
     output: list (int)
     """
     list_of_edges = []
     for i in range(0, df.shape[0]):
-        if df.iloc[i][1] == str(node):
-            list_of_edges.append(int(df.iloc[i][0]))
+        if df.iloc[i][1] == node:
+            list_of_edges.append(df.iloc[i][0])
+
     return list_of_edges
 
 
@@ -52,25 +69,44 @@ def get_all_nodes(df):
     list_of_all_nodes = []
     for i in range(1,df.shape[0]):
         for j in range(1,3):
-            try:
-                integer_value = int(df.iloc[i][j])
-                if integer_value not in list_of_all_nodes:
-                    list_of_all_nodes.append(integer_value)
-            except ValueError:
-                if df.iloc[i][j] not in list_of_all_nodes:
-                    list_of_all_nodes.append(df.iloc[i][j])
+            if df.iloc[i][j] not in list_of_all_nodes:
+                list_of_all_nodes.append(df.iloc[i][j])
+
     return list_of_all_nodes
+
+
+def get_end_node_in_network(df):
+    """
+    Function for extracting end node in network from Edges.txt
+    Assumption: There is only one end node.
+    input: dataframe 
+    output: last node in network (int)
+    """
+    all_nodes = get_all_nodes(df)
+    end_nodes = []
+    list_df2 = df.iloc[:,1].tolist()
+
+    for node in all_nodes:
+       if node not in list_df2:
+           end_nodes.append(node)
+    
+    end_nodes.remove('s') # remove slack node
+    return end_nodes
 
 
 def get_end_edge_in_network(df):
     """
-    Function for extracting end edge and end node in network from Edges.txt
-    We assume that there is only one node, that has an outgoing edge which isn't
-    further specified. We assume furthermore that is written at the bottom.
+    Function for extracting last edge in network from Edges.txt
+    Assumption: There is only one end edge attached to single end node.
     input: dataframe 
-    output: end edge (int), end node which is connected to that edge (int)
+    output: last edge (int)
     """
-    return df.shape[0]-1, df.iloc[df.shape[0]-1][2]
+    end_node = get_end_node_in_network(df)
+    list_df2 = df.iloc[:,2].tolist()
+    
+    for i, item in enumerate(list_df2): 
+        if item == end_node[0]:
+            return df.iloc[i][0]
 
 
 def get_starting_nodes_in_network(df):
@@ -81,15 +117,8 @@ def get_starting_nodes_in_network(df):
     """
     starting_nodes = []
     all_nodes = get_all_nodes(df)
-    list_df_col2 = df.iloc[:,2]
-    list_df2 = []
-    
-    for entry in list_df_col2:
-        try:
-           list_df2.append(int(entry))
-        except ValueError:
-            list_df2.append(entry)
-           
+    list_df2 = df.iloc[:,2].tolist()
+
     for node in all_nodes:
         if node not in list_df2:
             starting_nodes.append(node)
@@ -103,54 +132,44 @@ def get_starting_edges_in_network(df):
     input: dataframe 
     output: list of starting edges (int)
     """
-    list_df1 = []
     starting_edges = []
-    list_df_col1 = df.iloc[:,1]
+    list_df1 = df.iloc[:,1].tolist()
     starting_nodes = get_starting_nodes_in_network(df)
-    
-    for entry in list_df_col1:
-        try:
-           list_df1.append(int(entry))
-        except ValueError:
-            list_df1.append(entry)
-    
+
     for node in starting_nodes:
         for i in range(1, df.shape[0]):
-            try:
-                if int(list_df_col1[i]) == node:
-                    starting_edges.append(int(df.iloc[i][0]))
-            except ValueError:
-                pass
-    
+            if list_df1[i] == node:
+                starting_edges.append(df.iloc[i][0])
+                break
     return starting_edges
 
 
-def get_number_of_compressors_and_edges(df):
+def get_list_of_compressors(df):
     """
-    Function for extracting number of edges and all existing compressors from Edges.txt
+    Function for extracting number of all existing compressors from Edges.txt
     input: dataframe
     output: int, list (str)
     """
     list_of_compressors = []
-    number_of_edges = df.shape[0] #substract 1? because of the slack
     for i in range(0,df.shape[0]):
         for j in range(0,df.shape[1]):
-            if(bool(re.match("c[0-9]",df.iloc[i][j]))):
+            if(bool(re.match("c[0-9]",str(df.iloc[i][j])))):
                 list_of_compressors.append(df.iloc[i][j])
     unique_list_of_compressors = list(set(list_of_compressors))
-    return number_of_edges, unique_list_of_compressors    
+    return unique_list_of_compressors    
 
 
 def get_slack_connection_node(df):
     """
     Function for extracting node which is connected to slack in Arcs.txt
+    assumption: only one node is conneted to slack
     input: dataframe
     output: int
     """
     for i in range(0,df.shape[0]):
         for j in range(0,df.shape[1]):
             if df.iloc[i][j] == "s":
-                return int(df.iloc[i][j-1])
+                return df.iloc[i][j-1]
 
 
 def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps):
@@ -164,10 +183,12 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps):
     dx = length_of_pipe/n;
     dt = time_in_total/m;
     df = pd.read_csv('Arcs.txt', header = None)
-    number_of_edges, list_of_compressors = get_number_of_compressors_and_edges(df)
+    number_of_edges = df.shape[0]
+    list_of_compressors = get_list_of_compressors(df)
     number_of_compressors = len(list_of_compressors)
     number_of_configs = 2**number_of_compressors
     
+    # braucht man das?
     list_of_configs = [list(i) for i in itertools.product([0, 1], repeat = number_of_configs)]
     
     alpha = cas.MX.sym('alpha', m, number_of_configs)
@@ -190,22 +211,29 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps):
         Q += [cas.MX.sym('Q_{}_{}'.format(i, df.loc[i]), n, m)]
     
     ####################
+    #### Condition 1 ###
+
+    ####################
     #### Condition 2 ###
-    
-    # Idee: für jeden knoten mache eine Liste aus ingoing arcs und eine Liste aus outgoing arcs
-    # wir brauchen die arc nummer
     nodes_list = get_all_nodes(df)
+    slack_connection_node = get_slack_connection_node(df) #5
     starting_nodes = get_starting_nodes_in_network(df)
-    get_outgoing_edges = []
-    get_ingoing_edges = []
+    end_node = get_end_node_in_network(df)
     
-    # for t in range(0,m)
-    # TODO: you have to filter out all unnecessary nodes from nodes_list
+    # Filter out all unnecessary nodes from nodes_list 
+    # which are starting nodes, ending nodes, slack attached nodes
+    for item in starting_nodes:
+        nodes_list.remove(item)
+    nodes_list.remove(slack_connection_node)
+    nodes_list.remove(end_node)
+    
     for node in nodes_list:
+        ingoing_edges = []
+        outgoing_edges = []
         # if node not in starting_nodes: #and not slack?! and not ending node?!
         ingoing_edges = get_ingoing_edges(df,node)
         outgoing_edges = get_outgoing_edges(df,node)
-        # Q_in 
+ 
         for t in range(0,m):
             sum_Q_in = 0
             sum_Q_out = 0
@@ -214,7 +242,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps):
             for out_edge in outgoing_edges:
                 sum_Q_in = sum_Q_in + Q[out_edge][0,t]
             
-            g += sum_Q_in + sum_Q_out
+            g += sum_Q_in - sum_Q_out
             lbg += [0.]
             ubg += [0.]
         
@@ -222,7 +250,6 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps):
     ####################
     #### Condition 5 ###
     eps = np.loadtxt('eps.dat')
-    slack_connection_node = get_slack_connection_node(df) #5
     slack_connection_node_out_edges = get_outgoing_edges(df,slack_connection_node) #6,7
     list_ingoing_edges = get_ingoing_edges(df,slack_connection_node)
     
@@ -255,12 +282,8 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps):
 if __name__ == '__main__':
     # nur zum testen
     df = pd.read_csv('Edges.txt', header = None)
-    slack_connection_node = get_slack_connection_node(df)
-    starting_edges = get_starting_edges_in_network(df)
-    starting_nodes = get_starting_nodes_in_network(df)
-    # aaa, list_of_compressors = get_number_of_compressors_and_edges(df)
-    # list_of_ingoing_edges = get_ingoing_edges(df, 5)
-    # list_of_outgoing_edges = get_outgoing_edges(df, 5)
-    # last_node = get_end_edge_in_network(df)
-    # all_nodes = get_all_nodes(df)
+    df_to_int(df)
+    end_edge =  get_end_edge_in_network(df)
+    # list_of_compressors = get_list_of_compressors(df)
+
     
