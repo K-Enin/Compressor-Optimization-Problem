@@ -1,2 +1,3 @@
 TODO: 
-Check all the m-1 and m
+- Check all the m-1 and m
+- Text in der Beschreibung anpassen

@@ -1,0 +1,4 @@
+LengthPipe = 200
+TimeInTotal = 10
+Lambda = 
+Diameter = 
