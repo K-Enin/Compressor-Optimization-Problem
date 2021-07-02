@@ -1,4 +1,7 @@
+[configs]
 LengthPipe = 200
 TimeInTotal = 10
-Lambda = 
-Diameter = 
+Lambda = 0.011
+Diameter = 1
+MinPressureAtLastNode = 41
+FluxSpeed = 350
