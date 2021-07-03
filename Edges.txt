@@ -1,4 +1,4 @@
-Edge,In_node, out_node
+Edge,In_node,Out_node
 0,0,1
 1,1,2
 2,1,3

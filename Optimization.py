@@ -7,6 +7,7 @@ Discretized NLP for compressor optimization with outer convexification.
 
 Copyright 2021 Katharina Enin
 """
+
 import casadi as cas
 import configparser
 import itertools
@@ -14,23 +15,25 @@ import numpy as np
 import pandas as pd
 import re
 
-# Read Config Parameter
+# Read Config Parameters in Configs.txt
 config = configparser.ConfigParser()   
 config.read('Configs.txt')
 
-length_of_pipe = config['configs']['LengthPipe'] # universal length for all pipes (m)
-time_in_total = config['configs']['TimeInTotal'] # time (sec)
-Lambda = config['configs']['Lambda']
-D = config['configs']['Diameter']
-min_pressure_last_node = config['configs']['MinPressureAtLastNode'] 
-flux_speed = config['configs']['FluxSpeed'] 
+length_of_pipe = int(config['configs']['LengthPipe']) # universal length for all pipes (m)
+time_in_total = int(config['configs']['TimeInTotal']) # time (sec)
+Lambda = float(config['configs']['Lambda'])
+D = int(config['configs']['Diameter'])
+min_pressure_last_node = int(config['configs']['MinPressureAtLastNode']) 
+a = int(config['configs']['FluxSpeed']) 
+a_square = a*a
+# u = int(config['configs']['PressureIncreaseAtCompressor']) #?
 
 def df_to_int(df):
     """
-    Function for turning integers encapsulated in strings 
+    Function for extracting integers encapsulated in strings 
     into real integers, e.g. '3' becomes 3
-    input: dataframe
-    output: adjusted dataframe
+    input: dataframe with all strings
+    output: adjusted dataframe with int and strings
     """
     for i in range(0,df.shape[0]):
         for j in range(0,df.shape[1]):
@@ -42,9 +45,9 @@ def df_to_int(df):
 
 def get_ingoing_edges(df, node):
     """
-    Function for extracting ingoing edges from Edges.txt
+    Function for extracting ingoing edges for specific node
     input: dataframe, node from which we want to get the ingoing edges
-    output: list of edges (type: list of int)
+    output: list of edges (int)
     """
     list_of_edges = []
     for i in range(0, df.shape[0]):
@@ -56,9 +59,9 @@ def get_ingoing_edges(df, node):
 
 def get_outgoing_edges(df, node):
     """
-    Function for extracting outgoing arcs from Edges.txt
-    input: dataframe; node which we want to get the outgoing edges from
-    output: list (int)
+    Function for extracting outgoing edges for specific node
+    input: dataframe, node from which we want to get the outgoing edges
+    output: list of edges (int)
     """
     list_of_edges = []
     for i in range(0, df.shape[0]):
@@ -72,7 +75,7 @@ def get_all_nodes(df):
     """
     Function for extracting all nodes from Edges.txt
     input: dataframe
-    output: list (int & str)
+    output: list of nodes (int & str)
     """
     list_of_all_nodes = []
     for i in range(1,df.shape[0]):
@@ -86,7 +89,7 @@ def get_all_nodes(df):
 def get_end_node_in_network(df):
     """
     Function for extracting end node in network from Edges.txt
-    Assumption: There is only one end node.
+    assumption: there is only one end node.
     input: dataframe 
     output: last node in network (int)
     """
@@ -106,16 +109,16 @@ def get_end_node_in_network(df):
 def get_end_edge_in_network(df):
     """
     Function for extracting last edge in network from Edges.txt
-    Assumption: There is only one end edge attached to single end node. Break for loop
-    if it is found
+    assumption: there is only one end edge attached to single end node. 
+    thus break for loop if it is found
     input: dataframe 
     output: last edge (int)
     """
     end_node = get_end_node_in_network(df)
     list_df2 = df.iloc[:,2].tolist()
     
-    for i, item in enumerate(list_df2): 
-        if item == end_node[0]:
+    for i, node in enumerate(list_df2): 
+        if node == end_node[0]:
             return df.iloc[i][0]
 
 
@@ -159,7 +162,7 @@ def get_list_of_compressors(df):
     """
     Function for extracting number of all existing compressors from Edges.txt
     input: dataframe
-    output: int, list (str)
+    output: list of compressors (str)
     """
     list_of_compressors = []
     for i in range(0,df.shape[0]):
@@ -173,8 +176,8 @@ def get_list_of_compressors(df):
 
 def get_slack_connection_node(df):
     """
-    Function for extracting node which is connected to slack in Arcs.txt
-    assumption: only one node is conneted to slack
+    Function for extracting the node which is connected to slack bus in Arcs.txt
+    assumption: only one node is connected to slack bus
     input: dataframe
     output: int
     """
@@ -182,13 +185,29 @@ def get_slack_connection_node(df):
         for j in range(0,df.shape[1]):
             if df.iloc[i][j] == "s":
                 return df.iloc[i][j-1]
+            
+
+def get_all_edges_without_slack_edge(df):
+    """
+    Function for returning list of edges without the edge connected to the slack bus
+    (Useful for condition 2)
+    input: dataframe
+    output: list
+    """
+    list_df1 = df.iloc[:,2].tolist()
+    list_of_edges = []
+    for i, node in enumerate(list_df1):
+        if node != 's' and i != 0:
+            list_of_edges.append(df.iloc[i][0])
+    
+    return list_of_edges
 
 
 def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Arcsfile):
     """
     Function for setting up the NLP
-    input: P_time0, Q_time0, P_initialnode, Q_initialnode, eps (all as numpy object)
-           Arcs as string file -> ('Arcs.txt')
+    input: P_time0, Q_time0, P_initialnode, Q_initialnode, eps
+           Arcsfile as string file -> ('Arcs.txt')
     output: P, Q, alpha
     """
     n = np.shape(P_time0)[1]       # Number of space steps
@@ -198,10 +217,8 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Arcsfile
     df = pd.read_csv(Arcsfile, header = None)
     number_of_edges = df.shape[0]
     list_of_compressors = get_list_of_compressors(df)
-    number_of_configs = 2**len(list_of_compressors)
-    
-    # braucht man das?
-    list_of_configs = [list(i) for i in itertools.product([0, 1], repeat = number_of_configs)]
+    number_of_compressors = len(list_of_compressors)
+    number_of_configs = 2**number_of_compressors
     
     alpha = cas.MX.sym('alpha', m, number_of_configs)
     
@@ -213,21 +230,38 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Arcsfile
     lbg = []
     ubg = []
     
-    w0 += [.5] * (m-1) * number_of_configs # list with 208 elements, which are all 0.5
-    lbw += [0.] * (m-1) * number_of_configs # "
+    w0 += [.5] * (m-1) * number_of_configs
+    lbw += [0.] * (m-1) * number_of_configs
     ubw += [2.] * (m-1) * number_of_configs    
     
     P, Q = [],[]
-    for i in range(0,number_of_edges):
+    u = []
+    for i in range(0, number_of_edges): #sicher 1
         P += [cas.MX.sym('P_{}_{}'.format(i, df.loc[i]), n, m)] # nx x nt matrix with entries like 'xi_p_0_(0,2)'
         Q += [cas.MX.sym('Q_{}_{}'.format(i, df.loc[i]), n, m)]
+    
+    for com in list_of_compressors:
+        u += [cas.MX.sym('u_{}'.format(com), m)]
     
     ####################
     #### Condition 1 ###
     # PDE constraint
-
     
-
+    all_edges = get_all_edges_without_slack_edge(df)  
+    for edge in all_edges: 
+        for t in range(0,m-1):
+            for j in range(1,n-1):
+                g += P[edge][j,t+1] - 0.5*(P[edge][j+1,t] + P[edge][j-1,t]) + \
+                    dt/(2*dx)*(Q[edge][j+1,t] - Q[edge][j-1,t])
+                lbg += [0.]
+                ubg += [0.]
+                g += Q[edge][j,t+1] - 0.5*(Q[edge][j+1,t] + Q[edge][j-1,t]) + \
+                    dt/(2*dx)*(a_square)*(P[edge][j+1,t] - P[edge][j-1,t]) + \
+                        dt*Lambda/(4*D)*(Q[edge][j+1,t]*abs(Q[edge][j+1,t])/P[edge][j+1,t] + \
+                                         Q[edge][j-1,t]*abs(Q[edge][j-1,t])/P[edge][j-1,t]) 
+                lbg += [0.]
+                ubg += [0.]
+                
     ####################
     #### Condition 2 ###
     # Node property
@@ -262,8 +296,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Arcsfile
             g += sum_Q_in - sum_Q_out
             lbg += [0.]
             ubg += [0.]
-            
-    
+
     # p_node = p_pipe
     # additionaly filter out compressors of nodes_list
     # The pressure values at the end of all arcs connected to the same node must be equal
@@ -287,6 +320,25 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Arcsfile
     #### Condition 3 ###
     # Properties at compressor station    
     
+    # SOS1 constraint
+    g += [cas.mtimes(alpha, cas.DM.ones(number_of_configs))]
+    lbg += [1.] * (m) # ? unsure about m
+    ubg += [1.] * (m)
+
+    c = [list(i) for i in itertools.product([0, 1], repeat = number_of_configs)]
+    
+    for com in list_of_compressors:
+        ingoing_edge = get_ingoing_edges(df, com) # in our model there is only one ingoing edge to compressor
+        outgoing_edge = get_outgoing_edges(df, com) # same holds for outgoing edge
+        for t in range(0,m):
+            g += a_square*(P[ingoing_edge][n,t] - P[outgoing_edge][0,t]) - sum(alpha[t,s]*c[s][com]*u[com][t] 
+                                                                    for s in range(0,number_of_configs))
+            lbg += [0.]
+            ubg += [0.]
+            g += u[com][t] - sum(alpha[t,s]*u[com][t]*c[s][com]
+                                 for s in range(0,number_of_configs)) 
+            lbg += [0.]
+            ubg += [+cas.inf]
     
     ####################
     #### Condition 5 ###
@@ -312,20 +364,38 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Arcsfile
     
     ####################
     #### Condition 6 ###
+    # Properties at last node
     last_edge, last_node_in_network = get_end_edge_in_network(df)
     for t in range(0,m):
         g += P[last_edge][0,t]
         lbg += -cas.inf
         ubg += min_pressure_last_node
     
+    J = 0
+    # Objective function
+    for t in range(0,m):
+        J = J + sum(alpha[t,s]*c[s][com]*u[com][t]
+                    for s in range(0, number_of_configs) for com in range(0,number_of_compressors))
+
+    # Create NLP dictionary
+    nlp = {}
+    nlp['f'] = J
+    nlp['x'] = cas.vertcat(*w)
+    nlp['g'] = cas.vertcat(*g)
+
+    return nlp, lbw, ubw, lbg, ubg, w0
+    return nlp
     
+# def extract solution
     
-# We need function for sum up rounding
+# def sum up rounding
+
 
 if __name__ == '__main__':
     # nur zum testen
     df = pd.read_csv('Edges.txt', header = None)
-    # df_to_int(df)
+    df_to_int(df)
+    list_of_edges = get_all_edges_without_slack_edge(df)
     # end_edge =  get_end_edge_in_network(df)
     # list_of_compressors = get_list_of_compressors(df)
     # all_nodes = get_all_nodes(df)
