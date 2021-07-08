@@ -5,4 +5,3 @@ Lambda = 0.011
 Diameter = 1
 MinPressureAtLastNode = 41
 FluxSpeed = 350
-PressureIncreaseAtCompressor = 20
