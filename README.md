@@ -24,5 +24,8 @@ In order to test different application just adapt the folder name in Optimizatio
 In the Configs.txt you can find different config parameter, which can be change according to the desired network. 
 So far the code can only work with universal parameters - hence all pipes have the same length, the same diameter, and the same frictional value.
 
+### Generate data
+Initial data can be generated with the help of genereteInitialData.py.
+
 ### Consent
 The code can only be published and further used by third parties with the consent and knowledge of the author.
