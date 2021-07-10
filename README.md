@@ -12,7 +12,7 @@ We discretize the Weymouth Equation with Lax Friedrich method.
 ### Initial data
 As initial conditions we provide the following scripts: Edges, P_time0, Q_time0, P_initialnode, Q_initialnode, eps. \
 Edges.txt denotes all arcs in a directed graph, they are given as a list of directed entries.
-P_time0, Q_time0 provide initial values for P, Q at each spatial step in each pipe at t=0, where the number of rows corresponds to the number of pipes and the number of columns to the number of time steps.
+P_time0, Q_time0 provide initial values for P, Q at each spatial step in each pipe at t=0, where the number of rows corresponds to the number of pipes and the number of columns to the number of time steps. For P_time0 and Q_time0 we omit the slack connection edge.
 P_initialnode, Q_initialnode provides initial values for P, Q at starting node, where the number of columns corresponds to the time steps. 
 Eps represents the flow that is taken from the slack bus for converting gas to power. Its number of rows are again equal the number of time steps.
 
