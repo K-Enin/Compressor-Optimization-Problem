@@ -17,7 +17,7 @@ if case == 1:
     case = 1 
     n = 10
     m = 600 
-    number_of_edges = 7
+    number_of_edges = 8
     
     P_time0 = np.zeros((number_of_edges,n))
     Q_time0 = np.zeros((number_of_edges,n))
