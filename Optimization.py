@@ -264,7 +264,6 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
     
     # SOS1 constraint
     g += [cas.mtimes(alpha, cas.DM.ones(number_of_configs))] #600 x 2 und 2 x 1 -> 600 x 1
-    print(type(g))
     lbg += [1.] * (m)
     ubg += [1.] * (m)
     
@@ -286,9 +285,9 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
         # Set initial conditions
         if edge in starting_edges:
             # gehe zuerst zeilenweise durch P
-            w0 += [P_initialnode]
-            lbw += [P_initialnode] 
-            ubw += [P_initialnode]
+            w0 += [*P_initialnode]
+            lbw += [*P_initialnode] 
+            ubw += [*P_initialnode]
             for t in range(0,m):
                 for j in range(1,n):
                     if t == 0:
@@ -301,9 +300,9 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
                         ubw += [100000]#[+cas.inf]
 
             # gehe anschließend zeilenweise durch Q
-            w0 += [Q_initialnode]
-            lbw += [Q_initialnode] 
-            ubw += [Q_initialnode]
+            w0 += [*Q_initialnode]
+            lbw += [*Q_initialnode] 
+            ubw += [*Q_initialnode]
             for t in range(0,m):
                 for j in range(1,n):
                     if t == 0:
@@ -363,129 +362,128 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
             lbg += [0.] * (n-2)
             ubg += [0.] * (n-2)
                 
-    # ####################
-    # #### Condition 2 ###
-    # # Node property
+    ####################
+    #### Condition 2 ###
+    # Node property
     
+    nodes_list = get_all_nodes(df)
+    slack_connection_node = get_slack_connection_node(df) # 5
+    starting_nodes = get_starting_nodes_in_network(df)
+    end_node = get_end_node_in_network(df)
     
-    # nodes_list = get_all_nodes(df)
-    # slack_connection_node = get_slack_connection_node(df) # 5
-    # starting_nodes = get_starting_nodes_in_network(df)
-    # end_node = get_end_node_in_network(df)
+    # sum q_in = sum q_out
+    # Filter out all unnecessary nodes from nodes_list 
+    # which are starting nodes, ending nodes, slack attached nodes
+    for node in starting_nodes:
+        nodes_list.remove(node)
+    nodes_list.remove(slack_connection_node)
+    nodes_list.remove(end_node[0])
+    nodes_list.remove('s')
     
-    # # sum q_in = sum q_out
-    # # Filter out all unnecessary nodes from nodes_list 
-    # # which are starting nodes, ending nodes, slack attached nodes
-    # for node in starting_nodes:
-    #     nodes_list.remove(node)
-    # nodes_list.remove(slack_connection_node)
-    # nodes_list.remove(end_node[0])
-    # nodes_list.remove('s')
-    
-    # for node in nodes_list:
-    #     ingoing_edges = []
-    #     outgoing_edges = []
-    #     ingoing_edges = get_ingoing_edges(df,node)
-    #     outgoing_edges = get_outgoing_edges(df,node)
+    for node in nodes_list:
+        ingoing_edges = []
+        outgoing_edges = []
+        ingoing_edges = get_ingoing_edges(df,node)
+        outgoing_edges = get_outgoing_edges(df,node)
  
-    #     sum_Q_in = np.zeros((1,m))
-    #     sum_Q_out = np.zeros((1,m))
-    #     for in_edge in ingoing_edges:
-    #         sum_Q_out = sum_Q_out + Q[in_edge][n-1,:]
-    #     for out_edge in outgoing_edges:
-    #         sum_Q_in = sum_Q_in + Q[out_edge][0,:]
+        sum_Q_in = np.zeros((1,m))
+        sum_Q_out = np.zeros((1,m))
+        for in_edge in ingoing_edges:
+            sum_Q_out = sum_Q_out + Q[in_edge][n-1,:]
+        for out_edge in outgoing_edges:
+            sum_Q_in = sum_Q_in + Q[out_edge][0,:]
         
-    #     g += [(sum_Q_in - sum_Q_out).reshape((-1,1))] # 2 x 1
-    #     lbg += [0.,] * m
-    #     ubg += [0.,] * m
+        g += [(sum_Q_in - sum_Q_out).reshape((-1,1))] # 2 x 1
+        lbg += [0.,] * m
+        ubg += [0.,] * m
 
-    # # p_node = p_pipe
-    # # additionaly filter out compressors of nodes_list
-    # # The pressure values at the end of all arcs connected to the same node must be equal
-    # for node in list_of_compressors:
-    #     nodes_list.remove(node)
-    # nodes_list.append(slack_connection_node)   
-    # print(nodes_list)  
-    # for node in nodes_list: 
-    #     ingoing_edges = []
-    #     outgoing_edges = []
-    #     ingoing_edges = get_ingoing_edges(df, node)
-    #     outgoing_edges = get_outgoing_edges(df, node)
+    # p_node = p_pipe
+    # additionaly filter out compressors of nodes_list
+    # The pressure values at the end of all arcs connected to the same node must be equal
+    for node in list_of_compressors:
+        nodes_list.remove(node)
+    nodes_list.append(slack_connection_node)   
+ 
+    for node in nodes_list: 
+        ingoing_edges = []
+        outgoing_edges = []
+        ingoing_edges = get_ingoing_edges(df, node)
+        outgoing_edges = get_outgoing_edges(df, node)
         
-    #     for edge_in in ingoing_edges:
-    #              for edge_out in outgoing_edges:
-    #                  g += [(P[edge_in][n-1,:] - P[edge_out][0,:]).reshape((-1,1))]
-    #                  lbg += [0.] * m
-    #                  ubg += [0.] * m
+        for edge_in in ingoing_edges:
+                  for edge_out in outgoing_edges:
+                      g += [(P[edge_in][n-1,:] - P[edge_out][0,:]).reshape((-1,1))]
+                      lbg += [0.] * m
+                      ubg += [0.] * m
             
-    # ####################
-    # #### Condition 3 ###
-    # # Properties at compressor station
+    ####################
+    #### Condition 3 ###
+    # Properties at compressor station
 
-    # # matrix of all configurations
+    # matrix of all configurations
     c = [list(i) for i in itertools.product([0, 1], repeat = number_of_configs)]
     
-    # for j, com in enumerate(list_of_compressors):
-    #     ingoing_edge = get_ingoing_edges(df, com) # in our model there is only one ingoing edge to compressor
-    #     outgoing_edge = get_outgoing_edges(df, com) # same holds for outgoing edge
+    for j, com in enumerate(list_of_compressors):
+        ingoing_edge = get_ingoing_edges(df, com) # in our model there is only one ingoing edge to compressor
+        outgoing_edge = get_outgoing_edges(df, com) # same holds for outgoing edge
 
-    #     if len(ingoing_edge) != 0 and len(outgoing_edge) != 0: #proof for security
-    #         ingoing_edge = ingoing_edge[0]
-    #         outgoing_edge = outgoing_edge[0]
-    #         # g += [a_square*(P[outgoing_edge][0,:] - P[ingoing_edge][n-1,:]) - sum(alpha[:][s]*c[s][j]*u[j,:] 
-    #         #                                                         for s in range(0, number_of_configs))]
-    #         # Alternative zu oben
-    #         summe = np.zeros((m,1))
-    #         for  s in range(0, number_of_configs):
-    #             summe = summe + c[s][j]*alpha[:,s]*u[j][:]
-    #         print("Condition 3: " + str(len(g)))
-    #         g += [(a_square*(P[outgoing_edge][0,:] - P[ingoing_edge][n-1,:]) - summe.reshape((1,-1))).reshape((-1,1))]
+        if len(ingoing_edge) != 0 and len(outgoing_edge) != 0: #proof for security
+            ingoing_edge = ingoing_edge[0]
+            outgoing_edge = outgoing_edge[0]
+            # g += [a_square*(P[outgoing_edge][0,:] - P[ingoing_edge][n-1,:]) - sum(alpha[:][s]*c[s][j]*u[j,:] 
+            #                                                         for s in range(0, number_of_configs))]
+            # Alternative zu oben
+            summe = np.zeros((m,1))
+            for  s in range(0, number_of_configs):
+                summe = summe + c[s][j]*alpha[:,s]*u[j][:]
+            # print("Condition 3: " + str(len(g)))
+            g += [(a_square*(P[outgoing_edge][0,:] - P[ingoing_edge][n-1,:]) - summe.reshape((1,-1))).reshape((-1,1))]
     
             
-    #         lbg += [0.] * m
-    #         ubg += [0.] * m
+            lbg += [0.] * m
+            ubg += [0.] * m
         
-    #         #g += [u[j,:] - sum(alpha[:,s]*u[j][:]*c[s][j]
-    #         #                      for s in range(0, number_of_configs))]
-    #         # Alternative zu oben
-    #         summe = np.zeros((m,1))
-    #         for s in range(0, number_of_configs):
-    #             summe = summe + alpha[:,s]*u[j][:]*c[s][j]
+            #g += [u[j,:] - sum(alpha[:,s]*u[j][:]*c[s][j]
+            #                      for s in range(0, number_of_configs))]
+            # Alternative zu oben
+            summe = np.zeros((m,1))
+            for s in range(0, number_of_configs):
+                summe = summe + alpha[:,s]*u[j][:]*c[s][j]
 
-    #         g += [(u[j][:] - summe).reshape((-1,1))]
-    #         lbg += [0.] * m
-    #         ubg += [0.] * m
+            g += [(u[j][:] - summe).reshape((-1,1))]
+            lbg += [0.] * m
+            ubg += [0.] * m
         
         
-    # ####################
-    # #### Condition 5 ###
-    # # Properties at slack connection node
+    ####################
+    #### Condition 5 ###
+    # Properties at slack connection node
     
-    # slack_connection_node_out_edges = get_outgoing_edges(df,slack_connection_node) #6,7
-    # list_ingoing_edges = get_ingoing_edges(df,slack_connection_node) #4,5
+    slack_connection_node_out_edges = get_outgoing_edges(df,slack_connection_node) #6,7
+    list_ingoing_edges = get_ingoing_edges(df,slack_connection_node) #4,5
     
-    # # get edge 7, the one that is not connected to slack nodes
-    # for j in slack_connection_node_out_edges:
-    #     if isinstance(df.iloc[j][2],int):
-    #        filtered_slack_connection_node_out_edges = df.iloc[j][2]
+    # get edge 7, the one that is not connected to slack nodes
+    for j in slack_connection_node_out_edges:
+        if isinstance(df.iloc[j][2],int):
+            filtered_slack_connection_node_out_edges = df.iloc[j][2]
     
-    # # assumption: we assume that there is only one further outgoing edge besides the
-    # # the slack connection edge
-    # sum_of_Q = np.zeros((1,m))
-    # for j in range(0,len(list_ingoing_edges)):
-    #     sum_of_Q = sum_of_Q + Q[j][n-1,:]
-    #     g += [(sum_of_Q - Q[filtered_slack_connection_node_out_edges][0,:] - eps[:].reshape((1,-1))).reshape((-1,1))]
-    #     lbg += [0.] * m
-    #     ubg += [0.] * m
+    # assumption: we assume that there is only one further outgoing edge besides the
+    # the slack connection edge
+    sum_of_Q = np.zeros((1,m))
+    for j in range(0,len(list_ingoing_edges)):
+        sum_of_Q = sum_of_Q + Q[j][n-1,:]
+        g += [(sum_of_Q - Q[filtered_slack_connection_node_out_edges][0,:] - eps[:].reshape((1,-1))).reshape((-1,1))]
+        lbg += [0.] * m
+        ubg += [0.] * m
     
-    # ####################
-    # #### Condition 6 ###
-    # # Properties at last node
-    # end_edge = get_end_edge_in_network(df) # edge 7
+    ####################
+    #### Condition 6 ###
+    # Properties at last node
+    end_edge = get_end_edge_in_network(df) # edge 7
 
-    # g += [a_square*P[end_edge][n-1,:].reshape((-1,1))]
-    # lbg += [min_pressure_last_node] * m
-    # ubg += [+cas.inf] * m
+    g += [a_square*P[end_edge][n-1,:].reshape((-1,1))]
+    lbg += [min_pressure_last_node] * m
+    ubg += [+cas.inf] * m
     
     ###########################
     #### Objective function ###
