@@ -270,9 +270,12 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
     ubw += [2.] * m * number_of_configs 
     
     # u
-    for com in range(0, number_of_compressors):
-        u += [cas.MX.sym('u_{}'.format(com), m, 1)]
-        w += [cas.reshape(u[com], -1, 1)]
+    #for com in range(0, number_of_compressors):
+    #    u += [cas.MX.sym('u_{}'.format(com), m, 1)]
+    #    w += [cas.reshape(u[com], -1, 1)]
+    u = cas.MX.sym('u', m, number_of_compressors)
+    w += [cas.reshape(u, -1, 1)]
+    
 
     w0 += [0.] * m * number_of_compressors  
     lbw += [0.] * m * number_of_compressors
@@ -296,7 +299,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
                         ubw += [P_time0[edge,j]]
                     else: 
                         w0 += [60.] 
-                        lbw += [-cas.inf] 
+                        lbw += [0] #[-cas.inf] 
                         ubw += [+cas.inf]
     
             # go row-wise through Q
@@ -311,7 +314,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
                         ubw += [Q_time0[edge,j]]
                     else: 
                         w0 += [100.]  
-                        lbw += [-cas.inf] 
+                        lbw += [0] #[-cas.inf] 
                         ubw += [+cas.inf]
         else:
             # go row-wise through P
@@ -323,7 +326,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
                         ubw += [P_time0[edge,j]]
                     else:
                         w0 += [60.]
-                        lbw += [-cas.inf]
+                        lbw += [0] #[-cas.inf]
                         ubw += [+cas.inf]
 
             # go row-wise through Q
@@ -335,7 +338,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
                         ubw += [Q_time0[edge,j]]
                     else:
                         w0 += [100.]
-                        lbw += [-cas.inf]
+                        lbw += [0] #[-cas.inf]
                         ubw += [+cas.inf]
                         
     ####################
@@ -439,7 +442,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
 
             summe = np.zeros((m,1))
             for s in range(0, number_of_configs):
-                summe = summe + c[s][j]*alpha[:,s]*u[j][:]
+                summe = summe + c[s][j]*alpha[:,s]*u[:,j] # c[s][j]*alpha[:,s]*u[j][:]
 
             g += [(a_square*(P[outgoing_edge][0,:] - P[ingoing_edge][n-1,:]) - summe.reshape((1,-1))).reshape((-1,1))]
 
@@ -485,11 +488,12 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
     J = 0
     for t in range(0,m):
         for j in range(0, number_of_compressors):
-            J = J + 0.5*(u[j][t])**2
+            #J = J + 0.5*(u[j][t])**2
+            J = J + 0.5*(u[t,j])**2
         
     
     # Create NLP dictionary
-    parameters = [m, n, number_of_compressors, number_of_configs, number_of_edges]
+    parameters = [m, n, number_of_compressors, number_of_configs, number_of_edges_without_slack_edge]
     nlp = {}
     nlp['f'] = J
     nlp['x'] = cas.vertcat(*w)
@@ -509,9 +513,9 @@ def extract_solution(sol, parameters):
     alpha = np.array(cas.reshape(sol['x'][offset:offset + m * number_of_configs],
         m, number_of_configs))
     offset += m * number_of_configs
-    #u = np.array(cas.reshape(sol['x'][offset:offset + number_of_compressors * m],
-    #    number_of_compressors, m))
-    #offset += number_of_compressors * m
+    u = np.array(cas.reshape(sol['x'][offset:offset + number_of_compressors * m],
+        m, number_of_compressors))
+    offset += number_of_compressors * m
     P, Q = [], []
     for i in range(0, number_of_edges):
         P += [np.array(cas.reshape(sol['x'][offset:offset + m * n], m, n))]
@@ -532,7 +536,7 @@ if __name__ == '__main__':
      parameters, nlp, lbw, ubw, lbg, ubg, w0 = gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfile)
     
      # Solving the problem with ipopt solver
-     options = {'ipopt': {'tol': 1e-4, 'max_iter': 5}}
+     options = {'ipopt': {'tol': 1e-4, 'max_iter': 200}}
 
      solver = cas.nlpsol('solver', 'ipopt', nlp, options)
      sol = solver(x0 = w0, lbx = lbw, ubx = ubw, lbg = lbg, ubg = ubg)  
