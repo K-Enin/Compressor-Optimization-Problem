@@ -14,7 +14,7 @@ import pandas as pd
 import re
 
 # Set folder name, provide like this: 'Example1/'
-folder = 'Example1/'
+folder = 'Example3-higher_pressure/'
 
 # Read Config Parameters in Configs.txt
 config = configparser.ConfigParser()
@@ -233,6 +233,15 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
     print("This is m: " + str(m))
     dx = length_of_pipe/n # in (m)
     dt = time_in_total/m  # in (s) 
+    
+    # Sanity Checks
+    # Is CFL fulfilled?
+    if (dt*a_square > dx):
+        raise Exception("CFL is not fulfilled.")
+    # Dimensions are uniformy?
+    if (np.shape(P_time0) != np.shape(Q_time0) or np.shape(P_initialnode)[0] != np.shape(Q_initialnode)[0]):
+        raise Exception("Mitsmatch of dimension of Q_time0, P_time0 or P_initialnode, Q_initialnode.")
+    
     df = pd.read_csv(Edgesfile, header = None)
     df = df.iloc[1:, :] # drop first row, which is the header
     df = df.reset_index(drop=True)
@@ -268,9 +277,10 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
     # alpha
     alpha = cas.MX.sym('alpha', m, number_of_configs)
     w += [cas.reshape(alpha, -1, 1)] # reshape spaltenweise -> becomes one row
+    #w0 += [.5] * m * number_of_configs
     w0 += [.5] * m * number_of_configs
     lbw += [0.] * m * number_of_configs
-    ubw += [2.] * m * number_of_configs 
+    ubw += [1.] * m * number_of_configs 
     
     # u
     u = cas.MX.sym('u', m, number_of_compressors)
@@ -293,12 +303,13 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
             for t in range(1,m):
                 w0 += [P_initialnode[t]] + [60]*(n-1)
                 lbw += [P_initialnode[t]] + [0]*(n-1)
-                ubw += [P_initialnode[t]] + [100]*n*(m-1) #[+cas.inf]*(n-1)
-
+                ubw += [P_initialnode[t]] + [100]*(n-1) #[+cas.inf]*(n-1)
+                
             # go column-wise through Q
             w0 += [*Q_time0[edge]] + [100]*n*(m-1)
             lbw += [*Q_time0[edge]] + [0]*n*(m-1)
             ubw += [*Q_time0[edge]] + [200]*n*(m-1) #[+cas.inf]*n*(m-1)
+            
         elif edge == end_edge: 
             # go column-wise through P
             w0 += [*P_time0[edge]] + [60]*n*(m-1)
@@ -310,9 +321,9 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
             lbw += [*Q_time0[edge]] 
             ubw += [*Q_time0[edge]]
             for t in range(1,m):
-                w0 += [60]*(n-1) + [Q_initialnode[t]]
+                w0 += [100]*(n-1) + [Q_initialnode[t]]
                 lbw += [0]*(n-1) + [Q_initialnode[t]]
-                ubw += [+cas.inf]*(n-1) + [Q_initialnode[t]]
+                ubw += [200]*(n-1) + [Q_initialnode[t]]
         else: 
             # go column-wise through P
             w0 += [*P_time0[edge]] + [60]*n*(m-1)
@@ -320,49 +331,9 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
             ubw += [*P_time0[edge]] + [100]*n*(m-1)# [+cas.inf]*n*(m-1)
             
             # go column-wise through Q
-            w0 += [*Q_time0[edge]] + [100]*n*(m-1)
+            w0 += [*Q_time0[edge]] + [50]*n*(m-1)
             lbw += [*Q_time0[edge]] + [0]*n*(m-1)
             ubw += [*Q_time0[edge]] + [200]*n*(m-1)
-            
-        # if edge in starting_edges:
-        #     # go row-wise through P (pressure)
-        #     w0 += [*P_initialnode] # * bedeutet: entpacke eine Liste
-        #     lbw += [*P_initialnode] 
-        #     ubw += [*P_initialnode]
-        #     for j in range(1,n):
-        #         w0 += [P_time0[edge,j]] + [60]*(m-1)
-        #         lbw += [P_time0[edge,j]] + [0]*(m-1)
-        #         ubw += [P_time0[edge,j]] + [+cas.inf]*(m-1)
-        #     # go row-wise through Q
-        #     for j in range(0,n):
-        #         w0 += [Q_time0[edge,j]] + [60]*(m-1)
-        #         lbw += [Q_time0[edge,j]] + [0]*(m-1)
-        #         ubw += [Q_time0[edge,j]] + [+cas.inf]*(m-1)
-        # elif edge == end_edge:
-        #     # go row-wise through P
-        #     for j in range(0,n):
-        #         w0 += [P_time0[edge,j]] + [60]*(m-1)
-        #         lbw += [P_time0[edge,j]] + [0]*(m-1)
-        #         ubw += [P_time0[edge,j]] + [+cas.inf]*(m-1)
-        #     # go row-wise through Q
-        #     for j in range(0,n-1):
-        #         w0 += [Q_time0[edge,j]] + [100]*(m-1)
-        #         lbw += [Q_time0[edge,j]] + [0]*(m-1)
-        #         ubw += [Q_time0[edge,j]] + [+cas.inf]*(m-1)
-        #     w0 += [*Q_initialnode]
-        #     lbw += [*Q_initialnode] 
-        #     ubw += [*Q_initialnode]
-        # else:
-        #     # go row-wise through P
-        #     for j in range(0,n):
-        #         w0 += [P_time0[edge,j]] + [60]*(m-1)
-        #         lbw += [P_time0[edge,j]] + [0]*(m-1)
-        #         ubw += [P_time0[edge,j]] + [+cas.inf]*(m-1)
-        #     # go row-wise through Q
-        #     for j in range(0,n):
-        #         w0 += [Q_time0[edge,j]] + [50]*(m-1)
-        #         lbw += [Q_time0[edge,j]] + [0]*(m-1)
-        #         ubw += [Q_time0[edge,j]] + [+cas.inf]*(m-1)
     
     print("Initial conditions are set.")
     ####################
@@ -379,8 +350,8 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
             
             g += [Q[edge][1:-1,t+1] - 0.5*(Q[edge][2:,t] + Q[edge][:-2,t]) - \
                      dt/(2*dx)*(P[edge][:-2,t]- P[edge][2:,t]) + \
-                         dt*Lambda/(4*D)*(Q[edge][2:,t]*cas.fabs(Q[edge][2:,t])/(P[edge][2:,t]/a_square) + \
-                                           Q[edge][:-2,t]*cas.fabs(Q[edge][:-2,t])/(P[edge][:-2,t]/a_square))]
+                         a_square*dt*Lambda/(4*D)*(Q[edge][2:,t]*cas.fabs(Q[edge][2:,t])/P[edge][2:,t] + \
+                                           Q[edge][:-2,t]*cas.fabs(Q[edge][:-2,t])/P[edge][:-2,t])]
             lbg += [0.] * (n-2)
             ubg += [0.] * (n-2)
     
@@ -454,8 +425,8 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
     lbg += [1.] * (m)
     ubg += [1.] * (m)
     
-    # list containing all configurations
-    c = [list(i) for i in itertools.product([0, 1], repeat = number_of_configs)]
+    # list containing all compressor configurations
+    c = [list(i) for i in itertools.product([0, 1], repeat = number_of_compressors)]
     
     for j, com in enumerate(list_of_compressors):
         ingoing_edge = get_ingoing_edges(df, com) 
@@ -585,8 +556,8 @@ if __name__ == '__main__':
 
      parameters, nlp, lbw, ubw, lbg, ubg, w0 = gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfile)
     
-     # Solving the problem with ipopt solver
-     options = {'ipopt': {'tol': 1e-8, 'max_iter': 300}} # nächstes mal: 100
+     # Solving the problem with ipopt solve     
+     options = {'ipopt': {'tol': 1e-8, 'max_iter': 1000, 'linear_solver': 'ma27'}}
 
      solver = cas.nlpsol('solver', 'ipopt', nlp, options)
      sol = solver(x0 = w0, lbx = lbw, ubx = ubw, lbg = lbg, ubg = ubg)  
