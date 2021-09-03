@@ -303,18 +303,18 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
             for t in range(1,m):
                 w0 += [P_initialnode[t]] + [60]*(n-1)
                 lbw += [P_initialnode[t]] + [0]*(n-1)
-                ubw += [P_initialnode[t]] + [100]*(n-1) #[+cas.inf]*(n-1)
+                ubw += [P_initialnode[t]] + [+cas.inf]*(n-1)
                 
             # go column-wise through Q
             w0 += [*Q_time0[edge]] + [100]*n*(m-1)
-            lbw += [*Q_time0[edge]] + [0]*n*(m-1)
-            ubw += [*Q_time0[edge]] + [200]*n*(m-1) #[+cas.inf]*n*(m-1)
+            lbw += [*Q_time0[edge]] + [-cas.inf]*n*(m-1) #[0]*n*(m-1)
+            ubw += [*Q_time0[edge]] + [+cas.inf]*n*(m-1)
             
         elif edge == end_edge: 
             # go column-wise through P
             w0 += [*P_time0[edge]] + [60]*n*(m-1)
             lbw += [*P_time0[edge]] + [0]*n*(m-1)
-            ubw += [*P_time0[edge]] + [100]*n*(m-1)#[+cas.inf]*n*(m-1)
+            ubw += [*P_time0[edge]] + [+cas.inf]*n*(m-1)
             
             # go column-wise through Q
             w0 += [*Q_time0[edge]]
@@ -328,12 +328,12 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
             # go column-wise through P
             w0 += [*P_time0[edge]] + [60]*n*(m-1)
             lbw += [*P_time0[edge]] + [0]*n*(m-1)
-            ubw += [*P_time0[edge]] + [100]*n*(m-1)# [+cas.inf]*n*(m-1)
+            ubw += [*P_time0[edge]] + [+cas.inf]*n*(m-1)
             
             # go column-wise through Q
             w0 += [*Q_time0[edge]] + [50]*n*(m-1)
-            lbw += [*Q_time0[edge]] + [0]*n*(m-1)
-            ubw += [*Q_time0[edge]] + [200]*n*(m-1)
+            lbw += [*Q_time0[edge]] + [-cas.inf]*n*(m-1)#[0]*n*(m-1)
+            ubw += [*Q_time0[edge]] + [+cas.inf]*n*(m-1)
     
     print("Initial conditions are set.")
     ####################
@@ -342,16 +342,12 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
     
     for edge in range(0, number_of_edges_without_slack_edge):
         for t in range(0, m-1):
-            g += [P[edge][1:-1,t+1]/a_square - 0.5*(P[edge][2:,t]/a_square + P[edge][:-2,t]/a_square) - \
-                      dt/(2*dx)*(Q[edge][:-2,t] - Q[edge][2:,t])]
+            g += [P[edge][1:-1,t+1]/a_square - 0.5*(P[edge][2:,t]/a_square + P[edge][:-2,t]/a_square) - dt/(2*dx)*(Q[edge][:-2,t] - Q[edge][2:,t])]
 
             lbg += [0.] * (n-2)
             ubg += [0.] * (n-2)
             
-            g += [Q[edge][1:-1,t+1] - 0.5*(Q[edge][2:,t] + Q[edge][:-2,t]) - \
-                     dt/(2*dx)*(P[edge][:-2,t]- P[edge][2:,t]) + \
-                         a_square*dt*Lambda/(4*D)*(Q[edge][2:,t]*cas.fabs(Q[edge][2:,t])/P[edge][2:,t] + \
-                                           Q[edge][:-2,t]*cas.fabs(Q[edge][:-2,t])/P[edge][:-2,t])]
+            g += [Q[edge][1:-1,t+1] - 0.5*(Q[edge][2:,t] + Q[edge][:-2,t]) - dt/(2*dx)*(P[edge][:-2,t]- P[edge][2:,t]) + a_square*dt*Lambda/(4*D)*(Q[edge][2:,t]*cas.fabs(Q[edge][2:,t])/P[edge][2:,t] + Q[edge][:-2,t]*cas.fabs(Q[edge][:-2,t])/P[edge][:-2,t])]
             lbg += [0.] * (n-2)
             ubg += [0.] * (n-2)
     
@@ -464,8 +460,8 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_initialnode, eps, Edgesfil
 
     print("What is it: " + str(filtered_slack_connection_node_out_edges))
     sum_of_Q = np.zeros((1,m))
-    for j in range(0,len(list_ingoing_edges)):
-        sum_of_Q = sum_of_Q + Q[j][n-1,:]
+    for edge in list_ingoing_edges:
+        sum_of_Q = sum_of_Q + Q[edge][n-1,:]
     
     g += [(sum_of_Q - Q[filtered_slack_connection_node_out_edges][0,:] - eps[:].reshape((1,-1))).reshape((-1,1))]
     lbg += [0.] * m
