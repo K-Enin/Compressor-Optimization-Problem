@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Fri Aug 25
-Discretized NLP for compressor optimization with partial outer convexification.
+Discretized NLP for compressor optimization with gurobi and bonmin.
 @author: katharinaenin
 
 """
@@ -275,6 +275,9 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     # Parameters we are looking for
     P, Q = [],[]
     u = []
+    
+    # Vector provided information, whether value should be discrete or not
+    discrete = []
     # alpha does not need vector initialization
     
     ################################
@@ -287,6 +290,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     w0 += [.5] * m * number_of_configs
     lbw += [0.] * m * number_of_configs
     ubw += [1.] * m * number_of_configs 
+    discrete += [True] * m * number_of_configs 
     
     # u
     u = cas.MX.sym('u', m, number_of_compressors)
@@ -294,6 +298,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     w0 += [0.] * m * number_of_compressors  
     lbw += [0.] * m * number_of_compressors
     ubw += [+cas.inf] * m * number_of_compressors
+    discrete += [False] * m * number_of_compressors 
     
     # P, Q 
     for edge in range(0, number_of_edges_without_slack_edge):
@@ -341,6 +346,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
             lbw += [*Q_time0[edge]] + [-cas.inf]*n*(m-1)
             ubw += [*Q_time0[edge]] + [+cas.inf]*n*(m-1)
     
+    discrete += [False] * 2 * n * m * number_of_edges_without_slack_edge
     print("Initial conditions are set.")
     
     ####################
@@ -504,7 +510,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     nlp['x'] = cas.vertcat(*w)
     nlp['g'] = cas.vertcat(*g)
 
-    return parameters, nlp, lbw, ubw, lbg, ubg, w0
+    return parameters, nlp, lbw, ubw, lbg, ubg, w0, discrete
 
 
 def extract_solution(sol, parameters):
@@ -563,23 +569,14 @@ if __name__ == '__main__':
      eps = np.loadtxt(folder + 'eps2.dat')
      Edgesfile = folder + 'Edges.txt'
 
-     parameters, nlp, lbw, ubw, lbg, ubg, w0 = gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile)
+     parameters, nlp, lbw, ubw, lbg, ubg, w0, discrete = gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile)
     
      # Solving the problem with IPOPT solve 
      # and library 'ma27', since it has better performance for large nlp problems     
-     options = {'ipopt': {'tol': 1e-8, 'max_iter': 1000, 'linear_solver': 'mumps'}}
+     options = {'bonmin': {'max_iter': 500}, 'discrete': discrete}
 
-     solver = cas.nlpsol('solver', 'ipopt', nlp, options)
+     # solver = cas.nlpsol('solver', 'ipopt', nlp, options)
+     # solver = cas.nlpsol('nlp_solver', 'bonmin', nlp, options);
+     solver = cas.nlpsol('nlp_solver', 'gurobi', nlp, options);
      sol = solver(x0 = w0, lbx = lbw, ubx = ubw, lbg = lbg, ubg = ubg)  
      alpha, u, P, Q = extract_solution(sol, parameters)
-     
-     if True:
-         alpha2 = sum_up_rounding(alpha)
-         alpha2.reshape(-1,1)
-         
-         for i, v in enumerate(np.reshape(alpha2, -1, order = 'F')):
-            lbw[i] = v
-            ubw[i] = v
-         
-         sol2 = solver(x0 = sol['x'], lbx = lbw, ubx = ubw,lbg = lbg, ubg = ubg)
-         alpha2, u2, P2, Q2 = extract_solution(sol2, parameters)
