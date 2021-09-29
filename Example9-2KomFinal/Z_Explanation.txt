@@ -1,0 +1,13 @@
+Start with one Compressor.
+
+Time Step size:
+Dt = 1/60
+
+Spacial Step size: 
+Dx = 3000
+
+Time Steps:
+M = 300
+
+Space Steps:
+N = 4

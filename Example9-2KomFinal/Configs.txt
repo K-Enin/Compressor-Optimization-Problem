@@ -1,0 +1,14 @@
+[configs]
+LengthPipe = 12000
+TimeInTotal = 5
+Lambda = 0.011
+Diameter = 1
+MinPressureAtLastNode = 30
+FluxSpeed = 340
+[InitialGuesses]
+InitialGuess_P_beginEdge = 60
+InitialGuess_Q_beginEdge = 400
+InitialGuess_P_middleEdge = 60
+InitialGuess_Q_middleEdge = 200
+InitialGuess_P_endEdge = 60
+InitialGuess_Q_endEdge = 400
