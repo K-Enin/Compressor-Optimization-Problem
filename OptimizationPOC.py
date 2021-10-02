@@ -13,9 +13,19 @@ import numpy as np
 import pandas as pd
 import re
 import matplotlib.pyplot as plt
+from time import process_time
+import math
+import scipy.io
+import gurobipy as gp
+from gurobipy import GRB
 
 # Set folder name, provide like this: 'Example1/'
-folder = 'Example6/'
+folder = 'Example9-2KomFinal/'
+
+# Additional constrains that couple over time: True - on, False - off
+additional_constraints = True
+if additional_constraints: 
+    M1, M2 = 1/12, 1/12
 
 # Read Config Parameters in Configs.txt
 config = configparser.ConfigParser()
@@ -35,7 +45,6 @@ InitialGuess_Q_middleEdge = int(config['InitialGuesses']['InitialGuess_Q_middleE
 InitialGuess_P_endEdge = int(config['InitialGuesses']['InitialGuess_P_endEdge'])
 InitialGuess_Q_endEdge = int(config['InitialGuesses']['InitialGuess_Q_endEdge'])
 
-
 def df_to_int(df):
     """
     Function for extracting integers encapsulated in strings 
@@ -43,8 +52,8 @@ def df_to_int(df):
     input: dataframe with all strings
     output: adjusted dataframe with int and strings
     """
-    for i in range(0,df.shape[0]):
-        for j in range(0,df.shape[1]):
+    for i in range(df.shape[0]):
+        for j in range(df.shape[1]):
             try:
                 df.iloc[i][j] = int(df.iloc[i][j])
             except:
@@ -58,7 +67,7 @@ def get_ingoing_edges(df, node):
     output: list of edges (int)
     """
     list_of_edges = []
-    for i in range(0, df.shape[0]):
+    for i in range(df.shape[0]):
         if df.iloc[i][2] == node:
             list_of_edges.append(df.iloc[i][0])
                 
@@ -72,7 +81,7 @@ def get_outgoing_edges(df, node):
     output: list of edges (int)
     """
     list_of_edges = []
-    for i in range(0, df.shape[0]):
+    for i in range(df.shape[0]):
         if df.iloc[i][1] == node:
             list_of_edges.append(df.iloc[i][0])
 
@@ -86,7 +95,7 @@ def get_all_nodes(df):
     output: list of nodes (int & str)
     """
     list_of_all_nodes = []
-    for i in range(0,df.shape[0]):
+    for i in range(df.shape[0]):
         for j in range(1,3):
             if df.iloc[i][j] not in list_of_all_nodes:
                 list_of_all_nodes.append(df.iloc[i][j])
@@ -158,11 +167,10 @@ def get_starting_edges_in_network(df):
     starting_nodes = get_starting_nodes_in_network(df)
 
     for node in starting_nodes:
-        for i in range(0, df.shape[0]):
+        for i in range(df.shape[0]):
             if list_df1[i] == node:
                 starting_edges.append(df.iloc[i][0])
-                break 
-                # break, because starting node is only connected to one edge! 
+                break  # break, because starting node is only connected to one edge! 
     
     return starting_edges
 
@@ -174,8 +182,8 @@ def get_list_of_compressors(df):
     output: list of compressors (str)
     """
     list_of_compressors = []
-    for i in range(0,df.shape[0]):
-        for j in range(0,df.shape[1]):
+    for i in range(df.shape[0]):
+        for j in range(df.shape[1]):
             if(bool(re.match("c[0-9]",str(df.iloc[i][j])))):
                 list_of_compressors.append(df.iloc[i][j])
     unique_list_of_compressors = list(set(list_of_compressors)) # make list unique
@@ -190,11 +198,10 @@ def get_slack_connection_node(df):
     input: dataframe
     output: int
     """
-    for i in range(0,df.shape[0]):
-        for j in range(0,df.shape[1]):
-            if df.iloc[i][j] == "s": # works only if 's' is written at out_node
-                return df.iloc[i][j-1] # return in_node
-            
+    for i in range(df.shape[0]):
+        if df.iloc[i,2] == 's':
+            return df.iloc[i,1]
+
 
 def get_slack_connection_edge(df):
     """
@@ -204,12 +211,11 @@ def get_slack_connection_edge(df):
     output: int
     """
     slack_connection_node = get_slack_connection_node(df)
-    # list_of_outgoing_edges = []
     list_of_outgoing_edges = get_outgoing_edges(df, slack_connection_node) # 6,7
     for edge in list_of_outgoing_edges:
         if df.iloc[edge,2] == 's':
-            return df.iloc[edge,0] # there is only one
-        
+            return df.iloc[edge,0] # there is only one edge
+
 
 def get_all_edges_without_slack_edge(df):
     """
@@ -245,7 +251,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     # Is CFL fulfilled?
     if (dt*a_square > dx):
         raise Exception("CFL is not fulfilled.")
-    # Dimensions are uniformy?
+    # Are dimensions uniformy?
     if (np.shape(P_time0) != np.shape(Q_time0) or np.shape(P_initialnode)[0] != np.shape(Q_lastnode)[0]):
         raise Exception("Mitsmatch of dimension of Q_time0, P_time0 or P_initialnode, Q_lastnode.")
     
@@ -263,19 +269,13 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     end_edge = get_end_edge_in_network(df)
     
     # variables
-    w = []
-    w0 = []
-    lbw = []
-    ubw = []
+    w, w0, lbw, ubw  = [], [], [], []
 
     # constraints
-    g = []
-    lbg = []
-    ubg = []   
+    g, lbg, ubg = [], [], []  
     
     # Parameters we are looking for
-    P, Q = [],[]
-    u = []
+    P, Q, u = [], [], []
     # alpha does not need vector initialization
     
     ################################
@@ -284,7 +284,6 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     # alpha
     alpha = cas.MX.sym('alpha', m, number_of_configs)
     w += [cas.reshape(alpha, -1, 1)] # reshape spaltenweise 
-    #w0 += [.5] * m * number_of_configs
     w0 += [.5] * m * number_of_configs
     lbw += [0.] * m * number_of_configs
     ubw += [1.] * m * number_of_configs 
@@ -297,7 +296,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     ubw += [+cas.inf] * m * number_of_compressors
     
     # P, Q 
-    for edge in range(0, number_of_edges_without_slack_edge):
+    for edge in range(number_of_edges_without_slack_edge):
         P += [cas.MX.sym('P_{}'.format(edge), n, m)]
         Q += [cas.MX.sym('Q_{}'.format(edge), n, m)]
         w += [cas.reshape(P[edge], -1, 1), cas.reshape(Q[edge], -1, 1)]
@@ -310,7 +309,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
             for t in range(1,m):
                 w0 += [P_initialnode[t]] + [InitialGuess_P_beginEdge]*(n-1)
                 lbw += [P_initialnode[t]] + [0]*(n-1)
-                ubw += [P_initialnode[t]] + [+cas.inf]*(n-1)
+                ubw += [P_initialnode[t]] + [150]*(n-1) # bounded from above
                 
             # go column-wise through Q
             w0 += [*Q_time0[edge]] + [InitialGuess_Q_beginEdge]*n*(m-1)
@@ -321,7 +320,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
             # go column-wise through P
             w0 += [*P_time0[edge]] + [InitialGuess_P_endEdge]*n*(m-1)
             lbw += [*P_time0[edge]] + [0]*n*(m-1)
-            ubw += [*P_time0[edge]] + [+cas.inf]*n*(m-1)
+            ubw += [*P_time0[edge]] + [150]*n*(m-1) # bounded from above
             
             # go column-wise through Q
             w0 += [*Q_time0[edge]]
@@ -335,7 +334,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
             # go column-wise through P
             w0 += [*P_time0[edge]] + [InitialGuess_P_middleEdge]*n*(m-1)
             lbw += [*P_time0[edge]] + [0]*n*(m-1)
-            ubw += [*P_time0[edge]] + [+cas.inf]*n*(m-1)
+            ubw += [*P_time0[edge]] + [150]*n*(m-1) # bounded from above
             
             # go column-wise through Q
             w0 += [*Q_time0[edge]] + [InitialGuess_Q_middleEdge]*n*(m-1)
@@ -348,9 +347,10 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     #### Condition 1 ###
     # PDE constraint with Weymouth Equation
     bar_conv = 100000 # 1 bar = 100.000 (kg/(m*s^2))
-    for edge in range(0, number_of_edges_without_slack_edge):
-        for t in range(0, m-1):
-            g += [P[edge][1:-1,t+1]*bar_conv/a_square - 0.5*(P[edge][2:,t]*bar_conv/a_square + P[edge][:-2,t]*bar_conv/a_square) \
+    for edge in range(number_of_edges_without_slack_edge):
+        for t in range(m-1):
+            g += [P[edge][1:-1,t+1]*bar_conv/a_square - 0.5*(P[edge][2:,t]*bar_conv/a_square \
+                  + P[edge][:-2,t]*bar_conv/a_square) \
                   - dt/(2*dx)*(Q[edge][:-2,t] - Q[edge][2:,t])]
 
             lbg += [0.] * (n-2)
@@ -370,7 +370,6 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     # Node property
     
     ### sum q_in = sum q_out
-    
     nodes_list = get_all_nodes(df)
     slack_connection_node = get_slack_connection_node(df) # 5
     starting_nodes = get_starting_nodes_in_network(df)
@@ -386,32 +385,23 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     nodes_list.remove('s')
     
     for node in nodes_list:
-        ingoing_edges = []
-        outgoing_edges = []
         ingoing_edges = get_ingoing_edges(df,node)
         outgoing_edges = get_outgoing_edges(df,node)
  
-        sum_Q_in = np.zeros((1,m))
-        sum_Q_out = np.zeros((1,m))
-        for in_edge in ingoing_edges:
-            sum_Q_out = sum_Q_out + Q[in_edge][n-1,:]
-        for out_edge in outgoing_edges:
-            sum_Q_in = sum_Q_in + Q[out_edge][0,:]
+        sum_Q_out = sum(Q[in_edge][n-1,:] for in_edge in ingoing_edges)
+        sum_Q_in = sum(Q[out_edge][0,:] for out_edge in outgoing_edges)
         
         g += [(sum_Q_in - sum_Q_out).reshape((-1,1))]
         lbg += [0.,] * m
         ubg += [0.,] * m
     
     #### p_node = p_pipe
-    
     # remove compressor node
     for node in list_of_compressors:
         nodes_list.remove(node)
     nodes_list.append(slack_connection_node)
     
     for node in nodes_list: 
-        ingoing_edges = []
-        outgoing_edges = []
         ingoing_edges = get_ingoing_edges(df, node)
         outgoing_edges = get_outgoing_edges(df, node)
 
@@ -441,17 +431,13 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
         outgoing_edge = get_outgoing_edges(df, com)
 
         # In our model there is one ingoing and one outgoing edge for every compressors
-        # Angst vor zwei unterschiedlichen zusammenlaufenden Drücken?
+        # Angst vor zwei unterschiedlichen zusammenlaufenden Drücken
         if len(ingoing_edge) == 1 and len(outgoing_edge) == 1: 
             ingoing_edge = ingoing_edge[0]
             outgoing_edge = outgoing_edge[0]
 
-            summe = np.zeros((m,1))
-            for s in range(0, number_of_configs):
-                summe = summe + c[s][j]*alpha[:,s]*u[:,j]
-
-            g += [(P[outgoing_edge][0,:] - P[ingoing_edge][n-1,:] - summe.reshape((1,-1))).reshape((-1,1))]
-
+            sum_com = sum(c[s][j]*alpha[:,s]*u[:,j] for s in range(number_of_configs))
+            g += [(P[outgoing_edge][0,:] - P[ingoing_edge][n-1,:] - sum_com.reshape((1,-1))).reshape((-1,1))]
             lbg += [0.] * m
             ubg += [0.] * m
     print("Condition 3 is set.")
@@ -470,10 +456,9 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
         if j != number_of_edges_without_slack_edge: # not the last edge    
             filtered_slack_connection_node_out_edges = j # 6 
 
-    print("What is it: " + str(filtered_slack_connection_node_out_edges))
-    sum_of_Q = np.zeros((1,m))
-    for edge in list_ingoing_edges:
-        sum_of_Q = sum_of_Q + Q[edge][n-1,:]
+    print("What is slack connection node: " + str(filtered_slack_connection_node_out_edges))
+
+    sum_of_Q = sum(Q[edge][n-1,:] for edge in list_ingoing_edges)
     
     g += [(sum_of_Q - Q[filtered_slack_connection_node_out_edges][0,:] - eps[:].reshape((1,-1))).reshape((-1,1))]
     lbg += [0.] * m
@@ -488,18 +473,14 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     lbg += [min_pressure_last_node] * m
     ubg += [+cas.inf] * m
     print("Condition 5 is set.")
-    
+        
     ###########################
     #### Objective function ###
     
-    J = 0
-    for t in range(0,m):
-        for j in range(0, number_of_compressors):
-            J = J + 0.5*(u[t,j])**2
-        
-    
+    J = 0.5 * sum(u[t,j]**2 for t in range(m) for j in range(number_of_compressors))
+
     # Create NLP dictionary
-    parameters = [m, n, number_of_compressors, number_of_configs, number_of_edges_without_slack_edge, starting_edges, end_edge]
+    parameters = [dt, m, n, number_of_compressors, number_of_configs, number_of_edges_without_slack_edge, starting_edges, end_edge]
     nlp = {}
     nlp['f'] = J
     nlp['x'] = cas.vertcat(*w)
@@ -508,31 +489,7 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     return parameters, nlp, lbw, ubw, lbg, ubg, w0
 
 
-def extract_solution(sol, parameters):
-    """
-    Function for setting up the NLP
-    input: sol, parameters
-    output: alpha, u, P, Q
-    """
-    m, n, number_of_compressors, number_of_configs, number_of_edges, starting_edges, end_edge = parameters
-    offset = 0
-    alpha = np.array(cas.reshape(sol['x'][offset:offset + m * number_of_configs],
-        m, number_of_configs))
-    offset += m * number_of_configs
-    u = np.array(cas.reshape(sol['x'][offset:offset + number_of_compressors * m],
-        m, number_of_compressors))
-    offset += number_of_compressors * m
-    P, Q = [], []
-    for i in range(0, number_of_edges):
-        P += [np.array(cas.reshape(sol['x'][offset:offset + m * n], n, m))]
-        offset += m * n
-        Q += [np.array(cas.reshape(sol['x'][offset:offset + m * n], n, m))]
-        offset += m * n
-    
-    return alpha, u, P, Q
-
-
-def sum_up_rounding(alpha):
+def CIAP_SumUpRounding(alpha):
     """
     Sum Up Rounding for SOS1
     input: alpha
@@ -554,12 +511,84 @@ def sum_up_rounding(alpha):
         print('\nWarning: Sum-Up Rounding result not unique\n')
     return p
 
+
+def CIAP_MINLP(alpha, parameters, M1, M2):
+    """
+    Solving CIAP with additional constraints
+    input: alpha
+    output: beta
+    """    
+    dt, m, n, number_of_compressors, number_of_configs, number_of_edges, starting_edges, end_edge = parameters
+    model = gp.Model("CIAP")
+    eps = model.addVar(vtype = 'C', name = 'eps')
+    delta0 = model.addVars(number_of_configs, vtype = 'C', name = 'delta0')
+    beta = model.addVars(m, number_of_configs, vtype = 'B', name = 'beta')
+    
+    # list containing all compressor configurations
+    c = [list(i) for i in itertools.product([0, 1], repeat = number_of_compressors)]
+    
+    model.setObjective(eps, GRB.MINIMIZE)
+
+    # Deviation Constraint
+    for con in range(number_of_configs):
+        for k in range(m):
+            model.addConstr(delta0[con] + dt*sum(alpha[t,con] - beta[t,con]
+                                          for t in range(k-1)) <= eps)
+            model.addConstr(delta0[con] + dt*sum(alpha[t,con] - beta[t,con]
+                                          for t in range(k-1)) >= (-1.0) * eps)
+
+    # Additional constraints that couple over time
+    for j in range(number_of_compressors):
+        for k in range(m - math.floor(M1/dt)):
+            rside = sum(c[con][j]*math.floor(M1/dt)*(-beta[k,con] + beta[k+1,con])
+                    for con in range(number_of_configs))
+            
+            lside = sum(c[con][j]*beta[e,con]
+                    for con in range(number_of_configs) 
+                    for e in range(k+1, k + math.floor(M1/dt))) 
+            model.addConstr(lside - rside >= 0)
+            
+        for k in range(m - math.floor(M2/dt)):
+            rside = sum(c[con][j]*math.floor(M2/dt)*(beta[k,con] - beta[k+1,con])
+                                                   for con in range(number_of_configs))
+            lside = sum(1 - sum(c[con][j]*beta[e,con] 
+                        for con in range(number_of_configs)) 
+                        for e in range(k+1, k + math.floor(M2/dt)))
+            model.addConstr(lside - rside >= 0)
+
+    # SOS1 constraint
+    for t in range(0, m):
+        model.addConstr(sum(beta[t,con] for con in range(number_of_configs)) == 1)
+    
+    print("Additional constraints are set.")
+    
+    model.Params.TimeLimit = 1*20
+    model.optimize()
+    model.write('CIAP.lp')
+    eps_obj = model.objVal
+    
+    # Save tupledict variables in a matrix
+    sol_beta = np.zeros((m,number_of_configs))
+    tupledict_beta = model.getAttr('x', beta)
+    for t in range(m):
+        for j in range(number_of_configs):
+            sol_beta[t,j] = tupledict_beta[t,j]
+    
+    # Save delta0 variables in a vector
+    delta0_sol = np.zeros((number_of_configs, 1))
+    tupledict_delta0 = model.getAttr('x', delta0)
+    for j in range(number_of_configs):
+        delta0_sol[j] = tupledict_delta0[j]
+    
+    return eps_obj, delta0_sol, sol_beta
+
+    
 def plot_solution(alpha, u, P, Q, parameters):
     """
     Function for plotting the solution 
     input: alpha, u, P, Q
     """
-    m, n, number_of_compressors, number_of_configs, number_of_edges, starting_edges, end_edge = parameters
+    dt, m, n, number_of_compressors, number_of_configs, number_of_edges, starting_edges, end_edge = parameters
     t = np.arange(0,m)
     
     # plot u
@@ -570,6 +599,7 @@ def plot_solution(alpha, u, P, Q, parameters):
         axes[i].step(t, u[:,i])
         axes[i].set_xlabel(r'time $t$')
         axes[i].set_ylabel(r'control $u_{}$'.format(i))
+    #plt.savefig(folder + 'POCControl_u.png')
     
     # plot alpha
     plt.figure(2).clear()
@@ -581,44 +611,84 @@ def plot_solution(alpha, u, P, Q, parameters):
         axes[i].set_xlabel(r'time $t$')
         axes[i].set_ylabel(r'Switches $alpha_{}$'.format(i))
         k = k + 2
+    #plt.savefig(folder + 'POCSwitches_alpha.png')
     
     # plot inflow at first node
     plt.figure(3).clear()
     fig, axes = plt.subplots(num = 3)
     axes.plot(t, Q[starting_edges[0]][0,:])
-    axes.set(xlabel = r'time $t$', ylabel = 'mass flow (kg/s)')
+    axes.set(xlabel = r'time $t$', ylabel = 'mass flow (kg/s), first node')
+    #plt.savefig(folder + 'POCflow_firstNode.png')
     
     # plot pressure at last node
     plt.figure(4).clear()
     fig, axes = plt.subplots(num = 4)
     axes.plot(t, P[end_edge][n-1,:])
-    axes.set(xlabel = r'time $t$', ylabel = 'pressure (bar)')
+    axes.set(xlabel = r'time $t$', ylabel = 'pressure (bar), last node')
+    #plt.savefig(folder + 'POCpressure_lastNode.png')
+    
+
+def extract_solution(sol, parameters):
+    """
+    Function for Extracting Solution of the POC NLP
+    input: sol, parameters
+    output: alpha, u, P, Q
+    """
+    dt, m, n, number_of_compressors, number_of_configs, number_of_edges, starting_edges, end_edge = parameters
+    offset = 0
+    alpha = np.array(cas.reshape(sol['x'][offset:offset + m * number_of_configs],
+        m, number_of_configs))
+    offset += m * number_of_configs
+    u = np.array(cas.reshape(sol['x'][offset:offset + number_of_compressors * m],
+        m, number_of_compressors))
+    offset += number_of_compressors * m
+    P, Q = [], []
+    for i in range(number_of_edges):
+        P += [np.array(cas.reshape(sol['x'][offset:offset + m * n], n, m))]
+        offset += m * n
+        Q += [np.array(cas.reshape(sol['x'][offset:offset + m * n], n, m))]
+        offset += m * n
+    
+    return alpha, u, P, Q
     
 if __name__ == '__main__':
      P_initialnode = np.loadtxt(folder + 'P_initialnode.dat')
      Q_lastnode = np.loadtxt(folder + 'Q_lastnode.dat')
      P_time0 = np.loadtxt(folder + 'P_time0.dat')
      Q_time0 = np.loadtxt(folder + 'Q_time0.dat')
-     eps = np.loadtxt(folder + 'eps2.dat')
      Edgesfile = folder + 'Edges.txt'
+     mat_file = scipy.io.loadmat(folder + 'eps_file.mat')
+     
+     eps = mat_file["eps"]
+     eps[0,0] = 0 # to make things a little simpler 
+     eps = eps[:, 0:np.shape(P_initialnode)[0]]
 
      parameters, nlp, lbw, ubw, lbg, ubg, w0 = gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile)
     
      # Solving the problem with IPOPT solve 
      # and library 'ma27', since it has better performance for large nlp problems     
-     options = {'ipopt': {'tol': 1e-8, 'max_iter': 50, 'linear_solver': 'mumps'}}
+     # Somewhat 'hessian_approximation=limited-memory' option fixed "Restoration Failed" issue. 
+     options = {'ipopt': {'tol': 1e-8, 'max_iter': 30, 'linear_solver': 'ma27'}}
 
+     # Measure execution time of algorithm
+     t0_start = process_time()
      solver = cas.nlpsol('solver', 'ipopt', nlp, options)
      sol = solver(x0 = w0, lbx = lbw, ubx = ubw, lbg = lbg, ubg = ubg)  
      alpha, u, P, Q = extract_solution(sol, parameters)
      
-     alpha2 = sum_up_rounding(alpha)
-     alpha2.reshape(-1, 1)
+     if additional_constraints == True:
+         eps_obj,delta0, alpha2 = CIAP_MINLP(alpha, parameters, M1, M2)
+     else:
+         alpha2 = CIAP_SumUpRounding(alpha)
+         alpha2.reshape(-1, 1)
 
      for i, v in enumerate(np.reshape(alpha2, -1, order='F')):
          lbw[i] = v
          ubw[i] = v
 
-     sol2 = solver(x0=sol['x'], lbx = lbw, ubx = ubw, lbg = lbg, ubg = ubg)
-     alpha2, u2, P2, Q2 = extract_solution(sol2, parameters)
-     plot_solution(alpha2, u2, P2, Q2, parameters)
+     sol2 = solver(x0 = sol['x'], lbx = lbw, ubx = ubw, lbg = lbg, ubg = ubg)
+     alpha3, u2, P2, Q2 = extract_solution(sol2, parameters)
+     t0_stop = process_time()
+     elapsed_time = t0_stop - t0_start # floating number expressed in seconds
+     print("Time elapsed during execution of POC :" + str(elapsed_time))
+     plot_solution(alpha3, u2, P2, Q2, parameters)
