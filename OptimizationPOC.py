@@ -20,12 +20,19 @@ import gurobipy as gp
 from gurobipy import GRB
 
 # Set folder name, provide like this: 'Example1/'
-folder = 'Example9-2KomFinal/'
+folder = 'Example12-2KomFinal/'
 
 # Additional constrains that couple over time: True - on, False - off
 additional_constraints = True
 if additional_constraints: 
     M1, M2 = 1/12, 1/12
+    
+# Constraint on P and on Q
+lbP = 0 # lower boundary on P -> there is non negative pressure
+ubP = 80 # +cas.inf upper boundary on P -> der größte Wert bei Bonmin ist 76
+lbQ = -200 # -cas.inf
+ubQ = 600 # 600 #+cas.inf  #max value in Q is 550
+
 
 # Read Config Parameters in Configs.txt
 config = configparser.ConfigParser()
@@ -44,6 +51,7 @@ InitialGuess_P_middleEdge = int(config['InitialGuesses']['InitialGuess_P_middleE
 InitialGuess_Q_middleEdge = int(config['InitialGuesses']['InitialGuess_Q_middleEdge'])
 InitialGuess_P_endEdge = int(config['InitialGuesses']['InitialGuess_P_endEdge'])
 InitialGuess_Q_endEdge = int(config['InitialGuesses']['InitialGuess_Q_endEdge'])
+
 
 def df_to_int(df):
     """
@@ -308,19 +316,19 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
             ubw += [*P_time0[edge]]
             for t in range(1,m):
                 w0 += [P_initialnode[t]] + [InitialGuess_P_beginEdge]*(n-1)
-                lbw += [P_initialnode[t]] + [0]*(n-1)
-                ubw += [P_initialnode[t]] + [150]*(n-1) # bounded from above
+                lbw += [P_initialnode[t]] + [lbP]*(n-1) #[0]*(n-1)
+                ubw += [P_initialnode[t]] + [ubP]*(n-1) #[150]*(n-1) # bounded from above
                 
             # go column-wise through Q
             w0 += [*Q_time0[edge]] + [InitialGuess_Q_beginEdge]*n*(m-1)
-            lbw += [*Q_time0[edge]] + [-cas.inf]*n*(m-1)
-            ubw += [*Q_time0[edge]] + [+cas.inf]*n*(m-1)
+            lbw += [*Q_time0[edge]] + [lbQ]*n*(m-1)
+            ubw += [*Q_time0[edge]] + [ubQ]*n*(m-1)
             
         elif edge == end_edge: 
             # go column-wise through P
             w0 += [*P_time0[edge]] + [InitialGuess_P_endEdge]*n*(m-1)
-            lbw += [*P_time0[edge]] + [0]*n*(m-1)
-            ubw += [*P_time0[edge]] + [150]*n*(m-1) # bounded from above
+            lbw += [*P_time0[edge]] + [lbP]*n*(m-1) #[0]*n*(m-1)
+            ubw += [*P_time0[edge]] + [ubP]*n*(m-1) #[150]*n*(m-1) # bounded from above
             
             # go column-wise through Q
             w0 += [*Q_time0[edge]]
@@ -328,31 +336,30 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
             ubw += [*Q_time0[edge]]
             for t in range(1,m):
                 w0 += [InitialGuess_Q_endEdge]*(n-1) + [Q_lastnode[t]]
-                lbw += [0]*(n-1) + [Q_lastnode[t]]
-                ubw += [+cas.inf]*(n-1) + [Q_lastnode[t]]
+                lbw += [lbQ]*(n-1) + [Q_lastnode[t]]
+                ubw += [ubQ]*(n-1) + [Q_lastnode[t]]
         else: 
             # go column-wise through P
             w0 += [*P_time0[edge]] + [InitialGuess_P_middleEdge]*n*(m-1)
-            lbw += [*P_time0[edge]] + [0]*n*(m-1)
-            ubw += [*P_time0[edge]] + [150]*n*(m-1) # bounded from above
+            lbw += [*P_time0[edge]] +  [lbP]*n*(m-1) #[0]*n*(m-1)
+            ubw += [*P_time0[edge]] + [ubP]*n*(m-1) # bounded from above
             
             # go column-wise through Q
             w0 += [*Q_time0[edge]] + [InitialGuess_Q_middleEdge]*n*(m-1)
-            lbw += [*Q_time0[edge]] + [-cas.inf]*n*(m-1)
-            ubw += [*Q_time0[edge]] + [+cas.inf]*n*(m-1)
+            lbw += [*Q_time0[edge]] + [lbQ]*n*(m-1)
+            ubw += [*Q_time0[edge]] + [ubQ]*n*(m-1)
     
     print("Initial conditions are set.")
     
     ####################
     #### Condition 1 ###
     # PDE constraint with Weymouth Equation
-    bar_conv = 100000 # 1 bar = 100.000 (kg/(m*s^2))
+    bar_conv = 100000 # 1 bar = 100.000 (kg/(m*s^2)) (= 100.000 Pa)
     for edge in range(number_of_edges_without_slack_edge):
         for t in range(m-1):
             g += [P[edge][1:-1,t+1]*bar_conv/a_square - 0.5*(P[edge][2:,t]*bar_conv/a_square \
                   + P[edge][:-2,t]*bar_conv/a_square) \
                   - dt/(2*dx)*(Q[edge][:-2,t] - Q[edge][2:,t])]
-
             lbg += [0.] * (n-2)
             ubg += [0.] * (n-2)
             
@@ -479,6 +486,8 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
     
     J = 0.5 * sum(u[t,j]**2 for t in range(m) for j in range(number_of_compressors))
 
+    print("Objective function set.")
+
     # Create NLP dictionary
     parameters = [dt, m, n, number_of_compressors, number_of_configs, number_of_edges_without_slack_edge, starting_edges, end_edge]
     nlp = {}
@@ -562,7 +571,7 @@ def CIAP_MINLP(alpha, parameters, M1, M2):
     
     print("Additional constraints are set.")
     
-    model.Params.TimeLimit = 1*20
+    model.Params.TimeLimit = 5*60
     model.optimize()
     model.write('CIAP.lp')
     eps_obj = model.objVal
@@ -591,41 +600,62 @@ def plot_solution(alpha, u, P, Q, parameters):
     dt, m, n, number_of_compressors, number_of_configs, number_of_edges, starting_edges, end_edge = parameters
     t = np.arange(0,m)
     
+    c = [list(i) for i in itertools.product([0, 1], repeat = number_of_compressors)]
+    
     # plot u
     plt.figure(1).clear()
-    fig, axes  = plt.subplots(number_of_compressors, 1, num=1)
-    axes = axes.reshape((-1,)) if number_of_compressors > 1 else [axes]
-    for i in range(number_of_compressors):
-        axes[i].step(t, u[:,i])
-        axes[i].set_xlabel(r'time $t$')
-        axes[i].set_ylabel(r'control $u_{}$'.format(i))
-    #plt.savefig(folder + 'POCControl_u.png')
-    
-    # plot alpha
-    plt.figure(2).clear()
-    k = 0
     fig, axes  = plt.subplots(number_of_compressors, 1, num=2)
     axes = axes.reshape((-1,)) if number_of_compressors > 1 else [axes]
     for i in range(number_of_compressors):
-        axes[i].step(t, alpha[:,k])
-        axes[i].set_xlabel(r'time $t$')
-        axes[i].set_ylabel(r'Switches $alpha_{}$'.format(i))
-        k = k + 2
-    #plt.savefig(folder + 'POCSwitches_alpha.png')
+        axes[i].step(t, u[:,i])
+        axes[i].set_xlabel(r'time step $t$')
+        axes[i].set_ylabel(r'control $u_{}$'.format(i))
+    plt.savefig(folder + 'POCControl_u.png')
+    
+    # plot compressor on/off
+    plt.figure(2).clear()
+    # Vector provides which configuration is on for compressors
+    configurations_on = []
+    for time_step in range(m):
+        case = False
+        j = 0
+        while case == False:
+            if alpha[time_step, j] == 1:
+                configurations_on.append(c[j])
+                case = True
+            j = j + 1
+    configurations_on_vec = np.array(configurations_on)       
+    fig, axes  = plt.subplots(number_of_compressors, 1, num=2)
+    axes = axes.reshape((-1,)) if number_of_compressors > 1 else [axes]
+    for i in range(number_of_compressors):
+         axes[i].step(t, configurations_on_vec[:,i])
+         axes[i].set_xlabel(r'time step $t$')
+         axes[i].set_ylabel(r'$Compressor{}$'.format(i))
+    plt.savefig(folder + 'POCConf.png')
+    
+    # plot configurations
+    plt.figure(3).clear()
+    fig, axes  = plt.subplots(number_of_configs, 1, num=1)
+    axes = axes.reshape((-1,)) if number_of_compressors > 1 else [axes]
+    for i in range(number_of_configs):
+        axes[i].step(t, alpha[:,i])
+        axes[i].set_xlabel(r'time step $t$')
+        axes[i].set_ylabel(r'Configs $alpha_{}$'.format(i))
+    plt.savefig(folder + 'POCalpha.png')
     
     # plot inflow at first node
-    plt.figure(3).clear()
+    plt.figure(4).clear()
     fig, axes = plt.subplots(num = 3)
     axes.plot(t, Q[starting_edges[0]][0,:])
-    axes.set(xlabel = r'time $t$', ylabel = 'mass flow (kg/s), first node')
-    #plt.savefig(folder + 'POCflow_firstNode.png')
+    axes.set(xlabel = r'time step $t$', ylabel = 'mass flow (kg/s) at node 0')
+    plt.savefig(folder + 'POCflow_firstNode.png')
     
     # plot pressure at last node
-    plt.figure(4).clear()
+    plt.figure(5).clear()
     fig, axes = plt.subplots(num = 4)
     axes.plot(t, P[end_edge][n-1,:])
-    axes.set(xlabel = r'time $t$', ylabel = 'pressure (bar), last node')
-    #plt.savefig(folder + 'POCpressure_lastNode.png')
+    axes.set(xlabel = r'time step $t$', ylabel = 'pressure (bar) at node 6')
+    plt.savefig(folder + 'POCpressure_lastNode.png')
     
 
 def extract_solution(sol, parameters):
@@ -657,24 +687,26 @@ if __name__ == '__main__':
      P_time0 = np.loadtxt(folder + 'P_time0.dat')
      Q_time0 = np.loadtxt(folder + 'Q_time0.dat')
      Edgesfile = folder + 'Edges.txt'
-     mat_file = scipy.io.loadmat(folder + 'eps_file.mat')
-     
+     mat_file = scipy.io.loadmat(folder + 'eps_file3.mat')
      eps = mat_file["eps"]
-     eps[0,0] = 0 # to make things a little simpler 
-     eps = eps[:, 0:np.shape(P_initialnode)[0]]
+     eps[0,0] = round(eps[0,0],4) # to make things a little simpler 
+     #eps = eps[:, 0:np.shape(P_initialnode)[0]]
 
      parameters, nlp, lbw, ubw, lbg, ubg, w0 = gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile)
     
      # Solving the problem with IPOPT solve 
      # and library 'ma27', since it has better performance for large nlp problems     
      # Somewhat 'hessian_approximation=limited-memory' option fixed "Restoration Failed" issue. 
-     options = {'ipopt': {'tol': 1e-8, 'max_iter': 30, 'linear_solver': 'ma27'}}
+     options = {'ipopt': {'tol': 1e-8, 'max_iter': 1000, 'linear_solver': 'ma27'}}
 
      # Measure execution time of algorithm
      t0_start = process_time()
+     
      solver = cas.nlpsol('solver', 'ipopt', nlp, options)
      sol = solver(x0 = w0, lbx = lbw, ubx = ubw, lbg = lbg, ubg = ubg)  
      alpha, u, P, Q = extract_solution(sol, parameters)
+     
+     t0_stop_Step1 = process_time()
      
      if additional_constraints == True:
          eps_obj,delta0, alpha2 = CIAP_MINLP(alpha, parameters, M1, M2)
@@ -686,9 +718,21 @@ if __name__ == '__main__':
          lbw[i] = v
          ubw[i] = v
 
+     t0_stop_Step2 = process_time()
+
      sol2 = solver(x0 = sol['x'], lbx = lbw, ubx = ubw, lbg = lbg, ubg = ubg)
      alpha3, u2, P2, Q2 = extract_solution(sol2, parameters)
-     t0_stop = process_time()
-     elapsed_time = t0_stop - t0_start # floating number expressed in seconds
-     print("Time elapsed during execution of POC :" + str(elapsed_time))
+     
+     t0_stop_Step3 = process_time()
+     
+     # Computing Execution Time
+     Step1_time = t0_stop_Step1 - t0_start # floating number expressed in seconds
+     Step2_time = t0_stop_Step2 - t0_stop_Step1
+     Step3_time = t0_stop_Step3 - t0_stop_Step2
+     time_total = t0_stop_Step3 - t0_start
+     
+     print("Time elapsed, Step 1 :" + str(Step1_time) + "\n")
+     print("Time elapsed, Step 2 :" + str(Step2_time) + "\n")
+     print("Time elapsed, Step 3 :" + str(Step3_time) + "\n")
+     print("Total time elapsed during execution:" + str(time_total))
      plot_solution(alpha3, u2, P2, Q2, parameters)

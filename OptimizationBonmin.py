@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Fri Aug 25
@@ -18,12 +18,18 @@ import math
 import scipy.io 
 
 # Set folder name, provide like this: 'Example1/'
-folder = 'Example8-Final/'
+folder = 'Example12-2KomFinal/'
 
-# Additional constrains that couple over time: True - on, False - offs
-additional_constraints = False
+# Additional constrains couple over time: True - on, False - offs
+additional_constraints = True
 if additional_constraints:
     M1, M2 = 1/12, 1/12
+    
+# Constraint on P and on Q
+lbP = 0 #lower boundary on P -> there is non negative pressure
+ubP = 80 #80 #+cas.inf upper boundary on P -> der größte Wert bei Bonmin ist 76
+lbQ = -200
+ubQ = 600 #600 #+cas.inf  #max value in Q is 550
 
 # Read Config Parameters in Configs.txt
 config = configparser.ConfigParser()
@@ -314,19 +320,19 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
             ubw += [*P_time0[edge]]
             for t in range(1,m):
                 w0 += [P_initialnode[t]] + [InitialGuess_P_beginEdge]*(n-1)
-                lbw += [P_initialnode[t]] + [0]*(n-1)
-                ubw += [P_initialnode[t]] + [+cas.inf]*(n-1)
+                lbw += [P_initialnode[t]] + [lbP]*(n-1)
+                ubw += [P_initialnode[t]] + [ubP]*(n-1)
                 
             # go column-wise through Q
             w0 += [*Q_time0[edge]] + [InitialGuess_Q_beginEdge]*n*(m-1)
-            lbw += [*Q_time0[edge]] + [-cas.inf]*n*(m-1)
-            ubw += [*Q_time0[edge]] + [+cas.inf]*n*(m-1)
+            lbw += [*Q_time0[edge]] + [lbQ]*n*(m-1)
+            ubw += [*Q_time0[edge]] + [ubQ]*n*(m-1)
             
         elif edge == end_edge: 
             # go column-wise through P
             w0 += [*P_time0[edge]] + [InitialGuess_P_endEdge]*n*(m-1)
-            lbw += [*P_time0[edge]] + [0]*n*(m-1)
-            ubw += [*P_time0[edge]] + [+cas.inf]*n*(m-1)
+            lbw += [*P_time0[edge]] + [lbP]*n*(m-1)
+            ubw += [*P_time0[edge]] + [ubP]*n*(m-1)
             
             # go column-wise through Q
             w0 += [*Q_time0[edge]]
@@ -334,18 +340,18 @@ def gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile):
             ubw += [*Q_time0[edge]]
             for t in range(1,m):
                 w0 += [InitialGuess_Q_endEdge]*(n-1) + [Q_lastnode[t]]
-                lbw += [0]*(n-1) + [Q_lastnode[t]]
-                ubw += [+cas.inf]*(n-1) + [Q_lastnode[t]]
+                lbw += [lbQ]*(n-1) + [Q_lastnode[t]]
+                ubw += [ubQ]*(n-1) + [Q_lastnode[t]]
         else: 
             # go column-wise through P
             w0 += [*P_time0[edge]] + [InitialGuess_P_middleEdge]*n*(m-1)
-            lbw += [*P_time0[edge]] + [0]*n*(m-1)
-            ubw += [*P_time0[edge]] + [+cas.inf]*n*(m-1)
+            lbw += [*P_time0[edge]] + [lbP]*n*(m-1)
+            ubw += [*P_time0[edge]] + [ubP]*n*(m-1)
             
             # go column-wise through Q
             w0 += [*Q_time0[edge]] + [InitialGuess_Q_middleEdge]*n*(m-1)
-            lbw += [*Q_time0[edge]] + [-cas.inf]*n*(m-1)
-            ubw += [*Q_time0[edge]] + [+cas.inf]*n*(m-1)
+            lbw += [*Q_time0[edge]] + [lbQ]*n*(m-1)
+            ubw += [*Q_time0[edge]] + [ubQ]*n*(m-1)
     
     discrete += [False] * 2 * n * m * number_of_edges_without_slack_edge
     print("Initial conditions are set.")
@@ -559,42 +565,64 @@ def plot_solution(alpha, u, P, Q, parameters):
     """
     m, n, number_of_compressors, number_of_configs, number_of_edges, starting_edges, end_edge = parameters
     t = np.arange(0,m)
+
+    c = [list(i) for i in itertools.product([0, 1], repeat = number_of_compressors)]
     
     # plot u
     plt.figure(1).clear()
-    fig, axes  = plt.subplots(number_of_compressors, 1, num=1)
-    axes = axes.reshape((-1,)) if number_of_compressors > 1 else [axes]
-    for i in range(number_of_compressors):
-        axes[i].step(t, u[:,i])
-        axes[i].set_xlabel(r'time $t$')
-        axes[i].set_ylabel(r'control $u_{}$'.format(i))
-    plt.savefig(folder + 'BONControl_u.png')
-    
-    # plot alpha
-    plt.figure(2).clear()
-    k = 0
     fig, axes  = plt.subplots(number_of_compressors, 1, num=2)
     axes = axes.reshape((-1,)) if number_of_compressors > 1 else [axes]
     for i in range(number_of_compressors):
-        axes[i].step(t, alpha[:,k])
-        axes[i].set_xlabel(r'time $t$')
-        axes[i].set_ylabel(r'Switches $alpha_{}$'.format(i))
-        k = k + 2
-    plt.savefig(folder + 'BONSwitches_alpha.png')
+        axes[i].step(t, u[:,i])
+        axes[i].set_xlabel(r'time step $t$')
+        axes[i].set_ylabel(r'control $u_{}$'.format(i))
+    plt.savefig(folder + 'BONMINControl_u.png')
+    
+    # plot compressor on/off
+    plt.figure(2).clear()
+    # Vector provides which configuration is on for compressors
+    configurations_on = []
+    for time_step in range(m):
+        case = False
+        j = 0
+        while case == False:
+            if alpha[time_step, j] == 1:
+                configurations_on.append(c[j])
+                case = True
+            j = j + 1
+    configurations_on_vec = np.array(configurations_on)       
+    fig, axes  = plt.subplots(number_of_compressors, 1, num=2)
+    axes = axes.reshape((-1,)) if number_of_compressors > 1 else [axes]
+    for i in range(number_of_compressors):
+         axes[i].step(t, configurations_on_vec[:,i])
+         axes[i].set_xlabel(r'time step $t$')
+         axes[i].set_ylabel(r'$Compressor{}$'.format(i))
+    plt.savefig(folder + 'BONMINConf.png')
+    
+    # plot configurations
+    plt.figure(3).clear()
+    fig, axes  = plt.subplots(number_of_configs, 1, num=1)
+    axes = axes.reshape((-1,)) if number_of_compressors > 1 else [axes]
+    for i in range(number_of_configs):
+        axes[i].step(t, alpha[:,i])
+        axes[i].set_xlabel(r'time step $t$')
+        axes[i].set_ylabel(r'Configs $alpha_{}$'.format(i))
+    plt.savefig(folder + 'BONMINalpha.png')
     
     # plot inflow at first node
-    plt.figure(3).clear()
+    plt.figure(4).clear()
     fig, axes = plt.subplots(num = 3)
     axes.plot(t, Q[starting_edges[0]][0,:])
-    axes.set(xlabel = r'time $t$', ylabel = 'mass flow (kg/s), first node')
-    plt.savefig(folder + 'BONflow_firstNode.png')
+    axes.set(xlabel = r'time step $t$', ylabel = 'mass flow (kg/s), first node')
+    plt.savefig(folder + 'BONMINflow_firstNode.png')
     
     # plot pressure at last node
-    plt.figure(4).clear()
+    plt.figure(5).clear()
     fig, axes = plt.subplots(num = 4)
     axes.plot(t, P[end_edge][n-1,:])
-    axes.set(xlabel = r'time $t$', ylabel = 'pressure (bar), last node')
-    plt.savefig(folder  + 'BONpressure_lastNode.png')
+    axes.set(xlabel = r'time step $t$', ylabel = 'pressure (bar), last node')
+    plt.savefig(folder + 'BONMINpressure_lastNode.png')
+    
     
 if __name__ == '__main__':
      P_initialnode = np.loadtxt(folder + 'P_initialnode.dat')
@@ -603,15 +631,15 @@ if __name__ == '__main__':
      Q_time0 = np.loadtxt(folder + 'Q_time0.dat')
      # eps = np.loadtxt(folder + 'eps2.dat')
      Edgesfile = folder + 'Edges.txt'
-     mat_file = scipy.io.loadmat(folder + 'eps_file.mat')
+     mat_file = scipy.io.loadmat(folder + 'eps_file3.mat')
      eps = mat_file["eps"]
-     eps[0,0] = 0 # to make things a little simpler 
-     eps = eps[:, 0:np.shape(P_initialnode)[0]]
+     eps[0,0] = round(eps[0,0],4) # to make things a little simpler 
+     # eps = eps[:, 0:np.shape(P_initialnode)[0]]
 
      parameters, nlp, lbw, ubw, lbg, ubg, w0, discrete = gasnetwork_nlp(P_time0, Q_time0, P_initialnode, Q_lastnode, eps, Edgesfile)
     
      # Solving the problem with BONMIN solver    
-     options = {'bonmin': {'max_iter': 1000}, 'discrete': discrete}
+     options = {'bonmin': {'max_wall_time': 1800}, 'discrete': discrete} # in seconds, 1800 s = 30 min
      t0_start = process_time()
      solver = cas.nlpsol('nlp_solver', 'bonmin', nlp, options);
      sol = solver(x0 = w0, lbx = lbw, ubx = ubw, lbg = lbg, ubg = ubg)  
